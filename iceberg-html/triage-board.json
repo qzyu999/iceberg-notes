@@ -1,0 +1,56 @@
+[
+  {
+    "id": "ICD-102",
+    "title": "ROARING Positional Delete Vector serialization in Puffin blobs (Spec V3 compliance)",
+    "tag": "feat",
+    "est": 5,
+    "owner": "AY",
+    "column": "now",
+    "category": "performance"
+  },
+  {
+    "id": "ICD-103",
+    "title": "Support REST Catalog atomic 409 Conflict Retry Handling inside transaction blocks",
+    "tag": "bug",
+    "est": 2,
+    "owner": "JY",
+    "column": "now",
+    "category": "metadata"
+  },
+  {
+    "id": "ICD-104",
+    "title": "Spec evolution spec-id tracking failure during multithreaded partition schema adjustments",
+    "tag": "bug",
+    "est": 3,
+    "owner": "JY",
+    "column": "next",
+    "category": "structural"
+  },
+  {
+    "id": "ICD-105",
+    "title": "Clean up legacy Hadoop FileIO dependency leaks inside core package-private modules",
+    "tag": "debt",
+    "est": 8,
+    "owner": "AY",
+    "column": "later",
+    "category": "structural"
+  },
+  {
+    "id": "ICD-106",
+    "title": "Draft Spec V4 JSON Schema updates for metadata timestamp nanosecond resolution",
+    "tag": "chore",
+    "est": 4,
+    "owner": "PM",
+    "column": "cut",
+    "category": "metadata"
+  },
+  {
+    "id": "GH-3320",
+    "title": "Add commit retry and concurrency validation for writes",
+    "tag": "feat",
+    "est": 7,
+    "owner": "lawofcycles",
+    "column": "now",
+    "category": "metadata"
+  }
+]

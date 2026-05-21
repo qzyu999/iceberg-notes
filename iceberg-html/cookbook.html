@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICOD — Formal Methods Cookbook</title>
+    <meta name="description" content="Mathematical proofs, ACID state machine theorems, and storage layout safety locks for Apache Iceberg.">
+    
+    <!-- KaTeX for Beautiful LaTeX Math rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <i data-lucide="snowflake" class="logo-icon"></i>
+                </div>
+                <div class="brand-text">
+                    <span class="sub-brand">Iceberg Operations</span>
+                    <h1>ICOD Console</h1>
+                </div>
+            </div>
+            
+            <nav class="sidebar-menu">
+                <a href="index.html" class="nav-item" id="nav-dashboard">
+                    <span class="nav-number">01</span>
+                    <span>PR Review Hub</span>
+                </a>
+                <a href="spec-matrix.html" class="nav-item" id="nav-spec">
+                    <span class="nav-number">02</span>
+                    <span>Spec Matrix & Triage</span>
+                </a>
+                <a href="cookbook.html" class="nav-item active" id="nav-cookbook">
+                    <span class="nav-number">03</span>
+                    <span>Formal Cookbook</span>
+                </a>
+                <a href="simulator.html" class="nav-item" id="nav-simulator">
+                    <span class="nav-number">04</span>
+                    <span>Concurrency Auditor</span>
+                </a>
+                <a href="bindings.html" class="nav-item" id="nav-bindings">
+                    <span class="nav-number">05</span>
+                    <span>Bindings & Roadmap</span>
+                </a>
+                <a href="planner.html" class="nav-item" id="nav-planner">
+                    <span class="nav-number">06</span>
+                    <span>Amplification Planner</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="active-catalog-pill">
+                    <span class="indicator-dot pulse"></span>
+                    <span id="active-catalog-name">REST Catalog (Active)</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top Navbar with Breadcrumbs and Search -->
+            <header class="top-navbar">
+                <div class="wiki-breadcrumbs" style="margin-bottom: 0;">
+                    <span class="crumb">ICOD</span>
+                    <i data-lucide="chevron-right" class="crumb-separator"></i>
+                    <span class="crumb active">Formal Cookbook</span>
+                </div>
+                <div class="nav-search" style="width: 240px;">
+                    <i data-lucide="search"></i>
+                    <input type="text" id="global-search" placeholder="Search theorems...">
+                </div>
+            </header>
+
+            <!-- Main Scroll Container -->
+            <div class="pane-body-scroll">
+                <div class="wiki-grid">
+                    <!-- Left Column: Reading Article -->
+                    <article class="wiki-article">
+                        <section id="overview">
+                            <h1>Formal Architectural Cookbook</h1>
+                            <p class="pane-subtitle">Rigorous first-principles mathematical specification of the table state machine, ACID validation loops, and layout safety theorems.</p>
+                            
+                            <div style="display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap;">
+                                <span class="chip safe" style="font-size: 10px; padding: 3px 8px;">
+                                    <span class="dot"></span>
+                                    Format: V3 Spec Staged
+                                </span>
+                                <span class="chip" style="font-size: 10px; padding: 3px 8px; background: var(--g50);">
+                                    Role: PMC / Committer Track
+                                </span>
+                                <span class="chip attention" style="font-size: 10px; padding: 3px 8px;">
+                                    <span class="dot"></span>
+                                    Mathematically Verified
+                                </span>
+                            </div>
+
+                            <p>
+                                Welcome to the Formal Architectural Cookbook. In keeping with a principal-level engineering mindset, we represent Iceberg table operations as formal mathematical transitions over defined state machines. This ensures absolute correctness, ACID isolation, and safety invariants across catalog implementations and query engines.
+                            </p>
+                        </section>
+
+                        <section id="theorems" style="margin-top: 40px;">
+                            <h2>State Invariants & Safety Theorems</h2>
+                            <p>
+                                Audit active system axioms, state formulations, and transaction serializability proofs. Select a section from the right sidebar index to dynamically load the corresponding mathematical proofs.
+                            </p>
+                            
+                            <!-- Figure Block wrapping the dynamic mathematical content display -->
+                            <div class="figure-block">
+                                <div class="figure-content" id="cookbook-content-display" style="min-height: 480px;">
+                                    <!-- Populated dynamically via JS with loaded KaTeX formula formatting -->
+                                </div>
+                                <div class="figure-caption">
+                                    <span class="fig-num">Figure 3.1:</span> Table Invariants & Safety Theorems rendered via KaTeX LaTeX math processing.
+                                </div>
+                            </div>
+                        </section>
+                    </article>
+
+                    <!-- Right Column: Sticky Outline Navigator -->
+                    <aside class="wiki-outline">
+                        <div class="outline-sticky">
+                            <h4>On This Page</h4>
+                            <nav class="outline-nav">
+                                <a href="#overview" class="active">Overview</a>
+                                <a href="#theorems">Safety Proofs</a>
+                            </nav>
+                            
+                            <h4 style="margin-top: 28px;">Theorem Select</h4>
+                            <nav class="cookbook-nav" style="position: static; display: flex; flex-direction: column; gap: 6px;">
+                                <button class="cookbook-nav-item active" data-section="math-model" style="border: none; background: transparent; text-align: left; cursor: pointer; width: 100%; font-family: var(--sans);">1. State Machine Model</button>
+                                <button class="cookbook-nav-item" data-section="read-path" style="border: none; background: transparent; text-align: left; cursor: pointer; width: 100%; font-family: var(--sans);">2. Read-Path Row Projection</button>
+                                <button class="cookbook-nav-item" data-section="concurrency" style="border: none; background: transparent; text-align: left; cursor: pointer; width: 100%; font-family: var(--sans);">3. Transaction OCC Safety</button>
+                                <button class="cookbook-nav-item" data-section="compaction-theory" style="border: none; background: transparent; text-align: left; cursor: pointer; width: 100%; font-family: var(--sans);">4. Compaction & Safety Gates</button>
+                            </nav>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Page Specific Script -->
+    <script src="cookbook.js"></script>
+</body>
+</html>

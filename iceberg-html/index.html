@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICOD — PR Review & Governance Hub</title>
+    <meta name="description" content="A rigorous committer pre-commit code review, spec enforcement, and memory safety gate dashboard for Apache Iceberg.">
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Workspace Direct File Sync -->
+    <script src="workspace-sync.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <i data-lucide="snowflake" class="logo-icon"></i>
+                </div>
+                <div class="brand-text">
+                    <span class="sub-brand">Iceberg Operations</span>
+                    <h1>ICOD Console</h1>
+                </div>
+            </div>
+            
+            <nav class="sidebar-menu">
+                <a href="index.html" class="nav-item active" id="nav-dashboard">
+                    <span class="nav-number">01</span>
+                    <span>PR Review Hub</span>
+                </a>
+                <a href="spec-matrix.html" class="nav-item" id="nav-spec">
+                    <span class="nav-number">02</span>
+                    <span>Spec Matrix & Triage</span>
+                </a>
+                <a href="cookbook.html" class="nav-item" id="nav-cookbook">
+                    <span class="nav-number">03</span>
+                    <span>Formal Cookbook</span>
+                </a>
+                <a href="simulator.html" class="nav-item" id="nav-simulator">
+                    <span class="nav-number">04</span>
+                    <span>Concurrency Auditor</span>
+                </a>
+                <a href="bindings.html" class="nav-item" id="nav-bindings">
+                    <span class="nav-number">05</span>
+                    <span>Bindings & Roadmap</span>
+                </a>
+                <a href="planner.html" class="nav-item" id="nav-planner">
+                    <span class="nav-number">06</span>
+                    <span>Amplification Planner</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="active-catalog-pill">
+                    <span class="indicator-dot pulse"></span>
+                    <span id="active-catalog-name">REST Catalog (Active)</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top Navbar with Breadcrumbs and Search -->
+            <header class="top-navbar">
+                <div class="wiki-breadcrumbs" style="margin-bottom: 0;">
+                    <span class="crumb">ICOD</span>
+                    <i data-lucide="chevron-right" class="crumb-separator"></i>
+                    <span class="crumb active">PR Review Hub</span>
+                </div>
+                <div class="nav-search" style="width: 240px;">
+                    <i data-lucide="search"></i>
+                    <input type="text" id="global-search" placeholder="Search wiki...">
+                </div>
+            </header>
+
+            <!-- Main Scroll Container -->
+            <div class="pane-body-scroll">
+                <div class="wiki-grid">
+                    <!-- Left Column: Reading Article -->
+                    <article class="wiki-article">
+                        <section id="overview">
+                            <h1>PR Review & Governance Hub</h1>
+                            <p class="pane-subtitle">Pre-commit verification, format-specification policing, and dynamic metadata validation rules.</p>
+                            
+                            <!-- Workspace Sync Banner Container -->
+                            <div id="ws-sync-container"></div>
+                            
+                            <!-- Alert Banner advising user of review objectives -->
+                            <div class="alert-banner info">
+                                <i data-lucide="info" style="color: var(--olive); flex-shrink: 0; width: 16px; height: 16px; margin-top: 2px;"></i>
+                                <div>
+                                    <div class="alert-title">Principal Reviewer Objective</div>
+                                    Ensure that all proposed changes conform to strict modular boundaries (e.g. Flink/Spark integrations must not bleed into <code>core/</code>), enforce the customized serializability engine (banning Jackson annotations), and confirm memory bounds are respected.
+                                </div>
+                            </div>
+
+                            <p>
+                                Welcome to the pre-commit governance gateway. As a core maintainer of Apache Iceberg, you are responsible for maintaining the strict architectural boundaries between modules. PR reviews require verifying that engines do not leak engine-specific dependencies into the core module, enforcing customized serialization patterns, and checking spec gates.
+                            </p>
+
+                            <!-- GitHub REST API Sync Engine -->
+                            <div class="sync-card" style="margin-top: 24px;">
+                                <div class="sync-card-title">
+                                    <i data-lucide="git-pull-request" style="color: var(--clay); width: 16px; height: 16px;"></i>
+                                    <span>GitHub REST API Code Review Sync</span>
+                                </div>
+                                <p style="font-size: 11.5px; color: var(--g500); margin-bottom: 12px; font-family: var(--sans);">
+                                    Paste a public GitHub Pull Request URL below (e.g., <code>https://github.com/apache/iceberg/pull/10247</code>) to dynamically retrieve details, parse the unified diff, and render a live committer code review.
+                                </p>
+                                <div class="form-group-inline">
+                                    <input type="text" id="pr-url-input" class="form-input-text" placeholder="https://github.com/owner/repo/pull/number">
+                                    <button id="pr-fetch-btn" class="btn btn-primary" style="padding: 7px 14px; font-size: 12px; border-radius: 6px; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                        <i data-lucide="refresh-cw" style="width: 12px; height: 12px;"></i> Fetch & Review
+                                    </button>
+                                    <button id="pr-export-btn" class="btn ghost" style="padding: 7px 14px; font-size: 12px; border-radius: 6px; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                        <i data-lucide="download" style="width: 12px; height: 12px;"></i> Export JSON
+                                    </button>
+                                </div>
+                                <div id="pr-sync-status" class="sync-status-msg">
+                                    <span class="spinner" id="pr-sync-spinner"></span>
+                                    <span id="pr-sync-text">Syncing with GitHub API...</span>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section id="code-diff" style="margin-top: 40px;">
+                            <h2>Active Code Review</h2>
+                            <p id="pr-triage-desc">
+                                We are actively auditing <strong id="pr-title-display">PR #10247</strong>: <span id="pr-desc-display">Support V3 Spec Roaring Bitmaps for Positional Delete Vectors</span>. Review the proposed diff below and resolve the blocking architectural issues.
+                            </p>
+                            
+                            <!-- Figure Block wrapping the file diff -->
+                            <div class="figure-block">
+                                <div class="figure-content" style="padding: 0;">
+                                    <div class="file-card" style="border: none; margin-bottom: 0; border-radius: 0;">
+                                        <div class="file-head" style="border-radius: 0;">
+                                            <div class="file-path" id="file-path-display">
+                                                core/src/main/java/org/apache/iceberg/deletes/RoaringPositionDeleteWriter.java
+                                            </div>
+                                            <span class="risk-tag attention" id="risk-tag-display">High Risk</span>
+                                        </div>
+
+                                        <!-- Code Diff Console -->
+                                        <div class="diff" id="diff-container">
+                                            <div class="diff-row hunk">
+                                                <div class="ln">@@</div>
+                                                <div class="mark"></div>
+                                                <div class="code">@@ -45,14 +45,35 @@ public class RoaringPositionDeleteWriter implements PositionDeleteWriter {</div>
+                                            </div>
+                                            <div class="diff-row ctx">
+                                                <div class="ln">45</div>
+                                                <div class="mark"> </div>
+                                                <div class="code">  private final Path path;</div>
+                                            </div>
+                                            <div class="diff-row del">
+                                                <div class="ln">46</div>
+                                                <div class="mark">-</div>
+                                                <div class="code">  @com.fasterxml.jackson.annotation.JsonProperty("positions")</div>
+                                            </div>
+                                            <div class="diff-row del">
+                                                <div class="ln">47</div>
+                                                <div class="mark">-</div>
+                                                <div class="code">  private final List&lt;Long&gt; positions;</div>
+                                            </div>
+                                            <div class="diff-row ctx">
+                                                <div class="ln">48</div>
+                                                <div class="mark"> </div>
+                                                <div class="code">  private final Schema schema;</div>
+                                            </div>
+                                            <div class="diff-row add">
+                                                <div class="ln">49</div>
+                                                <div class="mark">+</div>
+                                                <div class="code">  private final RoaringBitmap bitmap;</div>
+                                            </div>
+                                            <div class="diff-row add">
+                                                <div class="ln">50</div>
+                                                <div class="mark">+</div>
+                                                <div class="code">  private final boolean enableVectorOptimization;</div>
+                                            </div>
+                                            <div class="diff-row add">
+                                                <div class="ln">51</div>
+                                                <div class="mark">+</div>
+                                                <div class="code"></div>
+                                            </div>
+                                            <div class="diff-row add">
+                                                <div class="ln">52</div>
+                                                <div class="mark">+</div>
+                                                <div class="code">  public RoaringPositionDeleteWriter(Path path, Schema schema) {</div>
+                                            </div>
+                                            <div class="diff-row add">
+                                                <div class="ln">53</div>
+                                                <div class="mark">+    Preconditions.checkNotNull(path, "Path cannot be null");</div>
+                                            </div>
+                                            <div class="diff-row add">
+                                                <div class="ln">54</div>
+                                                <div class="mark">+    this.path = path;</div>
+                                            </div>
+                                            <div class="diff-row add">
+                                                <div class="ln">55</div>
+                                                <div class="mark">+    this.schema = schema;</div>
+                                            </div>
+                                            <div class="diff-row add">
+                                                <div class="ln">56</div>
+                                                <div class="mark">+    this.bitmap = new RoaringBitmap();</div>
+                                            </div>
+                                            <div class="diff-row add">
+                                                <div class="ln">57</div>
+                                                <div class="mark">+    this.enableVectorOptimization = true;</div>
+                                            </div>
+                                            <div class="diff-row add">
+                                                <div class="ln">58</div>
+                                                <div class="mark">+  }</div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Inline Reviewer Comments -->
+                                        <div class="comments" id="comments-container">
+                                            <div class="bubble blocking">
+                                                <div class="bubble-meta">
+                                                    <span class="commenter">jared-yu-pmc</span>
+                                                    <span class="bubble-tag blocking">Blocking</span>
+                                                    <span class="dot">•</span>
+                                                    <span>2 hours ago</span>
+                                                </div>
+                                                <div class="bubble-content">
+                                                    <strong>Rule Violation [AGENTS.md Style/Serialization]:</strong> Banned use of standard Jackson annotations (<code>@JsonProperty</code>) in core files. Core serialization must utilize standard <code>XxxParser.toJson()</code> and <code>fromJson()</code> to maintain strict parser bounds, backward compatibility, and protect engine integrations. Please remove the annotation and implement <code>DeleteWriterParser</code>.
+                                                </div>
+                                            </div>
+
+                                            <div class="bubble blocking">
+                                                <div class="bubble-meta">
+                                                    <span class="commenter">iceberg-committer-bot</span>
+                                                    <span class="bubble-tag blocking">Blocking</span>
+                                                    <span class="dot">•</span>
+                                                    <span>1 hour ago</span>
+                                                </div>
+                                                <div class="bubble-content">
+                                                    <strong>Precondition Check Failure:</strong> The constructor violates package-private default restrictions. Unless proven necessary to promote class visibility to public, core writers should remain <strong>package-private</strong> to avoid polluting the public <code>api/</code> module.
+                                                </div>
+                                            </div>
+
+                                            <div class="bubble nit">
+                                                <div class="bubble-meta">
+                                                    <span class="commenter">principal-architect</span>
+                                                    <span class="bubble-tag nit">Nit</span>
+                                                    <span class="dot">•</span>
+                                                    <span>10 mins ago</span>
+                                                </div>
+                                                <div class="bubble-content">
+                                                    Consider utilizing <code>RoaringBitmap.runOptimize()</code> before serialization to minimize the memory footprint of physical positional deletions prior to writing.
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="figure-caption">
+                                    <span class="fig-num">Figure 1.1:</span> Positional delete vector code diff, highlighting custom serialization rules and package-private visibility boundaries.
+                                </div>
+                            </div>
+                        </section>
+
+                        <section id="state-inspector" style="margin-top: 40px;">
+                            <h2>Logical-to-Physical Table Spec State</h2>
+                            <p>
+                                Iceberg decouples logical user-facing tables from physical storage structures. Committing a new transaction generates a state progression. Click each node below to inspect state requirements and safety properties.
+                            </p>
+                            
+                            <!-- Figure Block wrapping the state inspector -->
+                            <div class="figure-block">
+                                <div class="figure-content">
+                                    <div class="interactive-diagram-wrapper" style="margin-top: 0;">
+                                        <!-- Navigation Nodes -->
+                                        <div class="diagram-nodes-row">
+                                            <div class="diagram-node node-catalog active">
+                                                <span class="node-title">1. Catalog Layer</span>
+                                                <span class="node-subtitle">Atomic Swap Invariant Anchor</span>
+                                            </div>
+                                            
+                                            <div class="diagram-arrow-vertical"></div>
+
+                                            <div class="diagram-node node-metadata">
+                                                <span class="node-title">2. Table Metadata JSON</span>
+                                                <span class="node-subtitle">Immutable Snapshot Timeline Log</span>
+                                            </div>
+
+                                            <div class="diagram-arrow-vertical"></div>
+
+                                            <div class="diagram-node node-manifest-list">
+                                                <span class="node-title">3. Manifest List File</span>
+                                                <span class="node-subtitle">Active Snapshot Index & Stats bounds</span>
+                                            </div>
+
+                                            <div class="diagram-arrow-vertical"></div>
+
+                                            <div class="diagram-node node-manifest">
+                                                <span class="node-title">4. Manifest File</span>
+                                                <span class="node-subtitle">Physical Data/Delete Indexes</span>
+                                            </div>
+
+                                            <div class="diagram-arrow-vertical"></div>
+
+                                            <div class="diagram-split-branches">
+                                                <div class="diagram-node node-data-file">
+                                                    <span class="node-title">5a. Physical Data</span>
+                                                    <span class="node-subtitle">Immutable Columnar Parquet</span>
+                                                </div>
+                                                <div class="diagram-node node-delete-file">
+                                                    <span class="node-title">5b. Deletion Vectors</span>
+                                                    <span class="node-subtitle">V3 Positional Bitmaps (.puffin)</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Diagram Details Panel -->
+                                        <div class="diagram-detail-panel">
+                                            <h5 id="diag-detail-title">1. Catalog Layer (Atomic Swap Anchor)</h5>
+                                            <p id="diag-detail-description">The catalog acts as the single source of truth, committing table updates by proposing a new metadata location and executing an atomic pointer swap (Optimistic Concurrency Control). Conflicting updates trigger client-side validation loops to determine serializability safety.</p>
+                                            <div class="detail-extra-info" id="diag-detail-extra">
+                                                <h6>Verifications Required</h6><code>validateDeletedFiles()</code> <code>validateNoConflictingAppends()</code>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="figure-caption">
+                                    <span class="fig-num">Figure 1.2:</span> Decoupled logical-to-physical specification layers, displaying the atomic validation bounds at each step.
+                                </div>
+                            </div>
+                        </section>
+                    </article>
+
+                    <!-- Right Column: Sticky Outline Navigator -->
+                    <aside class="wiki-outline">
+                        <div class="outline-sticky">
+                            <h4>On This Page</h4>
+                            <nav class="outline-nav">
+                                <a href="#overview" class="active">Overview</a>
+                                <a href="#code-diff">Active Code Review</a>
+                                <a href="#state-inspector">Logical-to-Physical Spec</a>
+                            </nav>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Page Specific Script -->
+    <script src="index.js"></script>
+</body>
+</html>

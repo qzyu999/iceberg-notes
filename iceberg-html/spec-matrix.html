@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICOD — Spec Matrix & Issue Triage</title>
+    <meta name="description" content="A comprehensive technical matrix comparing Apache Iceberg table format features coupled with an active committer triage kanban.">
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Workspace Direct File Sync -->
+    <script src="workspace-sync.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <i data-lucide="snowflake" class="logo-icon"></i>
+                </div>
+                <div class="brand-text">
+                    <span class="sub-brand">Iceberg Operations</span>
+                    <h1>ICOD Console</h1>
+                </div>
+            </div>
+            
+            <nav class="sidebar-menu">
+                <a href="index.html" class="nav-item" id="nav-dashboard">
+                    <span class="nav-number">01</span>
+                    <span>PR Review Hub</span>
+                </a>
+                <a href="spec-matrix.html" class="nav-item active" id="nav-spec">
+                    <span class="nav-number">02</span>
+                    <span>Spec Matrix & Triage</span>
+                </a>
+                <a href="cookbook.html" class="nav-item" id="nav-cookbook">
+                    <span class="nav-number">03</span>
+                    <span>Formal Cookbook</span>
+                </a>
+                <a href="simulator.html" class="nav-item" id="nav-simulator">
+                    <span class="nav-number">04</span>
+                    <span>Concurrency Auditor</span>
+                </a>
+                <a href="bindings.html" class="nav-item" id="nav-bindings">
+                    <span class="nav-number">05</span>
+                    <span>Bindings & Roadmap</span>
+                </a>
+                <a href="planner.html" class="nav-item" id="nav-planner">
+                    <span class="nav-number">06</span>
+                    <span>Amplification Planner</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="active-catalog-pill">
+                    <span class="indicator-dot pulse"></span>
+                    <span id="active-catalog-name">REST Catalog (Active)</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top Navbar with Breadcrumbs and Search -->
+            <header class="top-navbar">
+                <div class="wiki-breadcrumbs" style="margin-bottom: 0;">
+                    <span class="crumb">ICOD</span>
+                    <i data-lucide="chevron-right" class="crumb-separator"></i>
+                    <span class="crumb active">Spec Matrix & Triage</span>
+                </div>
+                <div class="nav-search" style="width: 240px;">
+                    <i data-lucide="search"></i>
+                    <input type="text" id="global-search" placeholder="Search wiki...">
+                </div>
+            </header>
+
+            <!-- Main Scroll Container -->
+            <div class="pane-body-scroll">
+                <div class="wiki-grid">
+                    <!-- Left Column: Reading Article -->
+                    <article class="wiki-article">
+                        <section id="overview">
+                            <h1>Format Spec Matrix & Active Issue Triage</h1>
+                            <p class="pane-subtitle">Manage feature specifications and coordinate code review cycles across open issues. <span id="triage-issues-count" class="badge badge-cyan" style="font-size: 10px; margin-left: 8px; vertical-align: middle;">5 Open</span></p>
+                            
+                            <!-- Workspace Sync Banner Container -->
+                            <div id="ws-sync-container"></div>
+                            
+                            <p>
+                                Apache Iceberg maintains a rigorous format specification across its version cycles. This page provides a matrix comparing format capabilities alongside an active committer triage board to direct pre-commit review cycles.
+                            </p>
+                        </section>
+
+                        <section id="triage-board" style="margin-top: 40px;">
+                            <h2>Active Issue Triage Board</h2>
+                            <p>
+                                Drag and drop pending technical issues between columns to schedule committer bandwidth. Filtering tags or searching keywords updates the queue dynamically.
+                            </p>
+
+                            <!-- GitHub REST API Issue Sync -->
+                            <div class="sync-card" style="margin-top: 16px;">
+                                <div class="sync-card-title">
+                                    <i data-lucide="git-pull-request" style="color: var(--clay); width: 16px; height: 16px;"></i>
+                                    <span>GitHub Repository Issue Sync Engine</span>
+                                </div>
+                                <p style="font-size: 11.5px; color: var(--g500); margin-bottom: 12px; font-family: var(--sans);">
+                                    Sync open issues and pull requests from public repositories directly into your operations backlog, or import a single ticket by URL.
+                                </p>
+                                <div style="display: flex; flex-direction: column; gap: 8px;">
+                                    <div class="form-group-inline" style="margin-bottom: 0;">
+                                        <input type="text" id="repo-sync-input" class="form-input-text" placeholder="owner/repo (e.g. apache/iceberg)" value="apache/iceberg">
+                                        <button id="repo-sync-btn" class="btn btn-primary" style="padding: 7px 14px; font-size: 12px; border-radius: 6px; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                            <i data-lucide="refresh-cw" style="width: 12px; height: 12px;"></i> Sync Issues
+                                        </button>
+                                    </div>
+                                    <div class="form-group-inline" style="margin-bottom: 0;">
+                                        <input type="text" id="issue-url-input" class="form-input-text" placeholder="Paste direct GitHub PR or Issue URL (e.g., https://github.com/apache/iceberg/issues/10123)">
+                                        <button id="issue-import-btn" class="btn btn-secondary" style="padding: 7px 14px; font-size: 12px; border-radius: 6px; display: flex; align-items: center; gap: 6px; cursor: pointer; border-color: var(--g300);">
+                                            <i data-lucide="plus-circle" style="width: 12px; height: 12px;"></i> Import URL
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="issue-sync-status" class="sync-status-msg">
+                                    <span class="spinner" id="issue-sync-spinner"></span>
+                                    <span id="issue-sync-text">Syncing...</span>
+                                </div>
+                            </div>
+
+                            <!-- Figure Block wrapping the Triage Board -->
+                            <div class="figure-block">
+                                <div class="figure-content" style="padding: 16px;">
+                                    <!-- Triage Board Toolbar -->
+                                    <div class="toolbar" style="margin-bottom: 16px;">
+                                        <div class="summary" style="font-size: 11.5px;">
+                                            Review Cycle: <b>Committer Milestones</b> <span class="dot">•</span> Total Issues: <b id="total-tickets-display">5</b>
+                                        </div>
+                                        <span class="filter-active" id="active-filter-badge" onclick="clearActiveFilter()">
+                                            Filter: <span id="active-filter-name">None</span> ✕
+                                        </span>
+                                        <div class="spacer"></div>
+                                        <button class="btn btn-primary btn-sm" onclick="toggleManualDrawer()" style="padding: 4px 8px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; margin-right: 6px;">
+                                            <i data-lucide="plus" style="width: 12px; height: 12px;"></i> Add Ticket
+                                        </button>
+                                        <button id="board-export-btn" class="btn btn-secondary btn-sm" style="padding: 4px 8px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; margin-right: 6px;">
+                                            <i data-lucide="download" style="width: 12px; height: 12px;"></i> Export JSON
+                                        </button>
+                                        <button class="btn btn-secondary btn-sm" onclick="resetKanbanState()" style="padding: 4px 8px; font-size: 11px; cursor: pointer;">
+                                            <i data-lucide="refresh-cw" style="width: 12px; height: 12px;"></i> Reset Board
+                                        </button>
+                                    </div>
+
+                                    <!-- Manual Ticket Drawer -->
+                                    <div class="drawer-card" id="manual-ticket-drawer">
+                                        <h4 style="font-family: var(--serif); font-size: 13px; margin-bottom: 12px; color: var(--slate); font-weight: 600;">Add Operations Backlog Ticket</h4>
+                                        <div class="form-grid">
+                                            <div class="form-field" style="grid-column: span 2;">
+                                                <label for="new-ticket-title">Title</label>
+                                                <input type="text" id="new-ticket-title" placeholder="Summary of technical issue...">
+                                            </div>
+                                            <div class="form-field">
+                                                <label for="new-ticket-id">Ticket ID</label>
+                                                <input type="text" id="new-ticket-id" placeholder="e.g. ICD-107">
+                                            </div>
+                                            <div class="form-field">
+                                                <label for="new-ticket-category">Spec Category</label>
+                                                <select id="new-ticket-category">
+                                                    <option value="performance">Performance</option>
+                                                    <option value="metadata">Metadata</option>
+                                                    <option value="structural">Structural</option>
+                                                    <option value="row-level">Row-level</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-field">
+                                                <label for="new-ticket-tag">Tag / Type</label>
+                                                <select id="new-ticket-tag">
+                                                    <option value="bug">bug</option>
+                                                    <option value="feat">feat</option>
+                                                    <option value="debt">debt</option>
+                                                    <option value="chore">chore</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-field">
+                                                <label for="new-ticket-owner">Owner Initials</label>
+                                                <input type="text" id="new-ticket-owner" placeholder="e.g. JY" maxlength="3">
+                                            </div>
+                                            <div class="form-field">
+                                                <label for="new-ticket-est">Estimate (days)</label>
+                                                <input type="number" id="new-ticket-est" placeholder="e.g. 3" min="1" max="30">
+                                            </div>
+                                        </div>
+                                        <div class="form-actions">
+                                            <button class="btn btn-secondary btn-sm" onclick="toggleManualDrawer()" style="padding: 4px 8px; font-size: 11px; cursor: pointer;">Cancel</button>
+                                            <button class="btn btn-primary btn-sm" onclick="saveManualTicket()" style="padding: 4px 8px; font-size: 11px; cursor: pointer;">Save Ticket</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Kanban Board Layout -->
+                                    <div class="board" id="triage-kanban-board" style="margin-bottom: 0;">
+                                        <!-- NOW Column -->
+                                        <div class="col" data-col="now">
+                                            <div class="col-head">
+                                                <h2>Now</h2>
+                                                <span class="count" id="count-now">0</span>
+                                            </div>
+                                            <div class="col-body" id="body-now"></div>
+                                            <div class="col-foot">
+                                                <span>Effort: <b id="effort-now">0d</b></span>
+                                            </div>
+                                        </div>
+
+                                        <!-- NEXT Column -->
+                                        <div class="col" data-col="next">
+                                            <div class="col-head">
+                                                <h2>Next</h2>
+                                                <span class="count" id="count-next">0</span>
+                                            </div>
+                                            <div class="col-body" id="body-next"></div>
+                                            <div class="col-foot">
+                                                <span>Effort: <b id="effort-next">0d</b></span>
+                                            </div>
+                                        </div>
+
+                                        <!-- LATER Column -->
+                                        <div class="col" data-col="later">
+                                            <div class="col-head">
+                                                <h2>Later</h2>
+                                                <span class="count" id="count-later">0</span>
+                                            </div>
+                                            <div class="col-body" id="body-later"></div>
+                                            <div class="col-foot">
+                                                <span>Effort: <b id="effort-later">0d</b></span>
+                                            </div>
+                                        </div>
+
+                                        <!-- CUT Column -->
+                                        <div class="col" data-col="cut">
+                                            <div class="col-head">
+                                                <h2>Cut</h2>
+                                                <span class="count" id="count-cut">0</span>
+                                            </div>
+                                            <div class="col-body" id="body-cut"></div>
+                                            <div class="col-foot">
+                                                <span>Effort: <b id="effort-cut">0d</b></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="figure-caption">
+                                    <span class="fig-num">Figure 2.1:</span> Committer Issue Triage Board, supporting drag-and-drop state transitions, localStorage persistence, and tags-based filtering.
+                                </div>
+                            </div>
+                        </section>
+
+                        <section id="spec-table" style="margin-top: 40px;">
+                            <h2>Format Specification Matrix</h2>
+                            <p>
+                                Iceberg spec evolutions require backward compatibility. The matrix below defines the version gateways and compliance guarantees for active table states.
+                            </p>
+
+                            <!-- Matrix Filtering Controls inside the flow -->
+                            <div class="glass-card" style="padding: 12px 16px; border-color: var(--g300); margin-bottom: 16px; box-shadow: none;">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <span style="font-size: 11.5px; font-weight: 600; color: var(--slate);">Filter Category:</span>
+                                    <div class="quick-links" style="margin: 0; display: flex; gap: 6px; flex-wrap: wrap;" id="spec-matrix-filters">
+                                        <button class="btn btn-secondary active" data-filter="all" style="padding: 4px 10px; font-size: 10.5px;">All</button>
+                                        <button class="btn btn-secondary" data-filter="structural" style="padding: 4px 10px; font-size: 10.5px;">Structural</button>
+                                        <button class="btn btn-secondary" data-filter="row-level" style="padding: 4px 10px; font-size: 10.5px;">Row-level</button>
+                                        <button class="btn btn-secondary" data-filter="performance" style="padding: 4px 10px; font-size: 10.5px;">Performance</button>
+                                        <button class="btn btn-secondary" data-filter="metadata" style="padding: 4px 10px; font-size: 10.5px;">Metadata</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Table Block wrapping spec table -->
+                            <div class="figure-block">
+                                <div class="figure-content" style="padding: 0;">
+                                    <div class="table-container" style="border: none; margin-bottom: 0; border-radius: 0;">
+                                        <table class="matrix-table">
+                                            <thead>
+                                                <tr>
+                                                    <th style="width: 25%;">Feature Definition</th>
+                                                    <th style="width: 12%; text-align: center;">Spec V1</th>
+                                                    <th style="width: 12%; text-align: center;">Spec V2</th>
+                                                    <th style="width: 12%; text-align: center;">Spec V3</th>
+                                                    <th style="width: 12%; text-align: center;">Spec V4 (Draft)</th>
+                                                    <th style="width: 27%;">Architectural Safety Guarantee</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="spec-matrix-body">
+                                                <!-- Populated dynamically via JS -->
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="figure-caption">
+                                    <span class="fig-num">Table 2.2:</span> Table Format Version Matrix, displaying compliance validation gates and engine integration tiers.
+                                </div>
+                            </div>
+                        </section>
+                    </article>
+
+                    <!-- Right Column: Sticky Outline Navigator -->
+                    <aside class="wiki-outline">
+                        <div class="outline-sticky">
+                            <h4>On This Page</h4>
+                            <nav class="outline-nav">
+                                <a href="#overview" class="active">Overview</a>
+                                <a href="#triage-board">Issue Triage Board</a>
+                                <a href="#spec-table">Format Spec Matrix</a>
+                            </nav>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Page Specific Script -->
+    <script src="spec-matrix.js"></script>
+</body>
+</html>

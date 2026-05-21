@@ -1,3 +1,22 @@
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one
+  or more contributor license agreements.  See the NOTICE file
+  distributed with this work for additional information
+  regarding copyright ownership.  The ASF licenses this file
+  to you under the Apache License, Version 2.0 (the
+  "License"); you may not use this file except in compliance
+  with the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing,
+  software distributed under the License is distributed on an
+  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+  KIND, either express or implied.  See the License for the
+  specific language governing permissions and limitations
+  under the License.
+-->
+
 # Rigorous Architectural Analysis: Merge-on-Read, RowDelta, and Deletion Vectors in Apache Iceberg & PyIceberg
 
 This document provides a rigorous, first-principles mathematical and computer science architectural review of **Merge-on-Read (MoR)**, **RowDelta** commits, and **Deletion Vectors (DVs)**. It traces the design paradigms from physical storage limits to the Java implementation (`/iceberg/`), maps out the potential scope for V2 and V3 spec compatibility in PyIceberg (`/iceberg-python/`), and defines the structural mechanics for PyIceberg compaction engines.
@@ -223,8 +242,7 @@ Target offsets to delete: [12, 85, 234, 1004, 1005, 54930, ...]
 *   **Positional Delete File (Parquet Int64)**:
     $$5,000 \times 64 \text{ bits} = \mathbf{320,000 \text{ bits}} \approx 40 \text{ KB}$$
 *   **Deletion Vector (Roaring Bitmap - Array Container)**:
-    $$5,000 \times 16 \text{ bits} = \mathbf{80,000 \text{ bits}} \approx 10 \text{ KB}$$
-    *(Save 4x space)*
+    $$5,000 \times 16 \text{ bits} = \mathbf{80,000 \text{ bits}} \approx 10 \text{ KB}$$ *(Save 4x space)*
 
 ##### Pattern B: Bulk Deletions (Deletes occur in contiguous blocks, e.g., rows 10,000 to 14,999)
 ```
@@ -234,8 +252,7 @@ Target offsets to delete: [10000, 10001, 10002, ..., 14999] (1 contiguous run of
     $$5,000 \times 64 \text{ bits} = \mathbf{320,000 \text{ bits}} \approx 40 \text{ KB}$$
 *   **Deletion Vector (Roaring Bitmap - RLE Container)**:
     Stores only the boundary: `(start=10000, run_length=5000)`.
-    $$1 \text{ run} \times 32 \text{ bits} = \mathbf{32 \text{ bits}} \approx 4 \text{ Bytes}$$
-    *(Save 10,000x space!)*
+    $$1 \text{ run} \times 32 \text{ bits} = \mathbf{32 \text{ bits}} \approx 4 \text{ Bytes}$$ *(Save 10,000x space!)*
 
 ##### 📊 Comparative Disk-Layout Mapping Table
 | Delete Pattern | Storage Format | Physical disk layout | Size on Disk (Bits) |
@@ -739,3 +756,315 @@ As a PR reviewer, you must hold code to the following proof-like criteria:
     *   *Proof in code*: Verify that the format version check is executed *before* initializing any `PuffinWriter` or V3 metadata updates.
 *   **Memory Bound Invariant**: Does this compaction code read the entire Parquet file into Python list memory, or does it stream it using Arrow C++ batches?
     *   *Proof in code*: Reject any PR that uses `.to_pylist()` or loops over individual rows in Python. All filters and projections must happen inside PyArrow C++ or native libraries to guarantee $O(\text{BatchSize})$ memory consumption.
+
+---
+
+## 8. Coordinated Roadmap: PyIceberg Table Maintenance & MoR Proposal Alignment
+
+This section bridges the theoretical bounds defined in this guide with your community strategic proposal draft at [Support_for_PyIceberg_Maintenance.md](file:///Users/jaredyu/Desktop/open_source/iceberg-notes/pyiceberg_maintenance/Support_for_PyIceberg_Maintenance.md). It maps out the PR dependency trees, spec compatibility logic, and the exact release phases required to land these changes without building architectural dead ends.
+
+### 8.1 Visual Dependency Graph: The PyIceberg Maintenance & Write Roadmap
+The high complexity of PyIceberg features stems from tight runtime dependencies. For example, **Data Compaction** (#3124) cannot safely commit without the metadata-only **REPLACE API** (#3131), which itself is vulnerable to data corruption unless **Commit Retry with Concurrency Validation** (#3320) is merged first.
+
+The following graph visualizes the precise path of pull requests and issues:
+
+```mermaid
+graph TD
+    %% Define Styles
+    classDef merged fill:#d4edda,stroke:#28a745,stroke-width:2px,color:#155724;
+    classDef open fill:#fff3cd,stroke:#ffc107,stroke-width:2px,color:#856404;
+    classDef closed fill:#f8d7da,stroke:#dc3545,stroke-width:2px,color:#721c24;
+
+    %% Phase 1: bedrock validation blocks
+    subgraph P1 ["Phase 1: Transaction Bedrock"]
+        PR_1935["PR #1935: validation_history<br/>(Merged)"]:::merged
+        PR_1938["PR #1938: validateDeletedDataFiles<br/>(Merged)"]:::merged
+        PR_2050["PR #2050: validateAddedDataFiles<br/>(Merged)"]:::merged
+        PR_3049["PR #3049: validateNoNewDeleteFiles<br/>(Merged)"]:::merged
+        PR_3320["PR #3320: Commit Retry / Conflict Val<br/>(Open / In-Progress)"]:::open
+        
+        PR_1935 --> PR_3320
+        PR_1938 --> PR_3320
+        PR_2050 --> PR_3320
+        PR_3049 --> PR_3320
+    end
+
+    %% Phase 2: compaction
+    subgraph P2 ["Phase 2: Compaction Bedrock"]
+        PR_3131["PR #3131: REPLACE Snapshot API<br/>(Open / In-Progress)"]:::open
+        PR_3124["PR #3124: Data File Compaction (CoW)<br/>(Open / In-Progress)"]:::open
+        PR_3361["PR #3361: Delete Orphan Files<br/>(Open)"]:::open
+        PR_1958["PR #1958: Delete Orphan Files<br/>(Closed / Reopen Candidate)"]:::closed
+        
+        PR_3320 --> PR_3131
+        PR_3131 --> PR_3124
+        PR_3124 --> PR_3361
+        PR_3124 --> PR_1958
+    end
+
+    %% Phase 3: MoR Write path
+    subgraph P3 ["Phase 3: Interoperable MoR Write Path"]
+        PR_1516["PR #1516: DV Read Support (V3)<br/>(Merged)"]:::merged
+        PR_3285["PR #3285: Equality Delete Conversion<br/>(Open)"]:::open
+        PR_2822["PR #2822: DV Write Support (V3)<br/>(Closed / Resurrect Candidate)"]:::closed
+        
+        PR_3124 --> PR_3285
+        PR_3285 --> PR_2822
+    end
+
+    %% Phase 4: Metadata Optimization
+    subgraph P4 ["Phase 4: Manifest & Snapshot Cleanup"]
+        PR_1880["PR #1880: Expire Snapshots<br/>(Merged)"]:::merged
+        PR_2143["PR #2143: MaintenanceTable Refactor<br/>(Merged)"]:::merged
+        PR_1661["PR #1661: RewriteManifests API<br/>(Closed / Resurrect Candidate)"]:::closed
+        
+        PR_1880 --> PR_2143
+        PR_3124 --> PR_1661
+    end
+```
+
+---
+
+### 8.2 Execution Phases & Community Resource Allocation
+
+To prevent community burnout and ensure each PR is worth the extensive review cycles required, we break down the roadmap into four incremental phases.
+
+#### Phase 1: Transaction Bedrock (Bedrock Validation & Concurrency Safety)
+*   **Target Objective**: Make PyIceberg a first-class citizen for transactional safety, enabling concurrent workers to read and write without causing silent data loss or dirty writes.
+*   **Active PRs**:
+    *   **PR #3320** (lawofcycles): *Commit retry with data conflict validation*.
+*   **Strategic Value**: **Extremely High**. This is the single most critical gating PR for all transactional writes. It must land before PR #3131 or PR #3124 can be safely deployed in production. It implements the OCC retry loops modeled in Section 2.1.
+*   **Reviewer Priority**: Block all other writing features and dedicate top maintainer reviews to land PR #3320.
+
+#### Phase 2: CoW Compaction & Orphan Cleanup (Solving the Small File Problem)
+*   **Target Objective**: Resolve the runaway storage bloat and the degradation of read queries (small file problem) in single-node Python workspaces.
+*   **Active PRs**:
+    *   **PR #3131** (qzyu999): *Feature: Add metadata-only replace API to Table for REPLACE snapshot operations*.
+    *   **PR #3124** (qzyu999): *Support data files compaction*.
+    *   **PR #3361 / PR #1958**: *Delete orphan files*.
+*   **Strategic Value**: **High**. This introduces the CoW-style bin-packing compaction (modeled in Section 4.1). Landing this solves the single-node performance bottlenecks caused by heavy query fragmentation.
+*   **Developer Alignment**: Reopen PR #1958 or actively review PR #3361 concurrently. Once PR #3124 merges, it will aggressively generate unreferenced "orphan" Parquet files; PyIceberg *must* have orphan file pruners ready to prevent catastrophic storage cost spikes.
+
+#### Phase 3: Interoperable MoR Write Path & Deletion Vectors
+*   **Target Objective**: Introduce high-performance Merge-on-Read capabilities without duplicate development overhead.
+*   **Active PRs**:
+    *   **PR #3285** (rambleraptor): *Equality Delete support and dynamic conversion*.
+    *   **PR #2822** (rambleraptor): *Iceberg Deletion Vector Write Support* (Needs resurrection).
+*   **The V2 vs. V3 Strategic Decision**:
+    *   *Decision*: **Skip V2 Positional Delete Writes (#1808), but merge V2 Equality Delete Conversion (#3285) & V3 DV Writes (#2822)**.
+    *   *Rationale*: Storing positional deletes in Parquet files ($M \times 64$ bits, Section 1.4) introduces redundant complexity. Skip V2 positional writes entirely to save developer time, and go straight to V3 Deletion Vectors (Roaring Bitmaps, Section 3.3).
+    *   *Interop Exception*: We **must** support V2 Equality Delete reading and conversion (#3285) because upstream streaming frameworks (e.g. Apache Flink, Spark structured streaming) write V2 equality deletes. PyIceberg must be able to read these files and compact them into clean V3 Deletion Vectors to act as an effective compaction engine for mixed-language data lakes.
+
+#### Phase 4: Manifest and Metadata Optimization
+*   **Target Objective**: Compress manifest metadata layers to prevent catalog query degradation.
+*   **Active PRs**:
+    *   **PR #1661** (amitgilad3): *Support metadata compaction (RewriteManifests)* (Needs resurrection).
+*   **Strategic Value**: **Medium**. Rewriting manifests scales down table metadata loading times when tables accumulate thousands of commits. It should be completed once Phase 2 (Data Compaction) is fully deployed.
+
+---
+
+### 8.3 Feature Interaction Matrix
+Use this matrix to trace how individual PR goals interact with core table properties:
+
+| Feature Area | PR | Direct Interaction / Pre-requisite | Core Constraint (from `AGENTS.md`) |
+| :--- | :--- | :--- | :--- |
+| **Commit Validation** | **PR #3320** | Bedrock for all updates. Pre-requisite for REPLACE. | Do not widening public method signatures; use package-private scopes by default. |
+| **Data Compaction** | **PR #3124** | Requires **PR #3131** (REPLACE API) and **PR #3320** (Retry). | Ensure the zero-copy Arrow memory boundary is respected. Avoid `.to_pylist()`. |
+| **Orphan Deletion** | **PR #3361** | Triggered immediately after compaction runs to clean unreferenced files. | Must not delete files that are currently active in the concurrent catalog snapshots. |
+| **Equality Conversion**| **PR #3285** | Must read heavy dynamic predicates and serialize them to compact DVs. | Reject Jackson annotations; ensure kebab-case serialization keys in Open-API/REST. |
+| **Deletion Vectors** | **PR #2822** | Requires stable `PuffinWriter` logic. | Check format version gating `table_metadata.format_version >= 3` before writing DVs. |
+| **Manifest Rewrite** | **PR #1661** | Resolves metadata bloating after compaction changes table states. | Ensure parallel scans call `copyWithoutStats()` when building manifest lists. |
+
+---
+
+### 8.4 Reviewer's Cost-Benefit & ROI Checklist
+Before approving or prioritizing a PR in the PyIceberg maintenance stream, evaluate its ROI:
+
+```
+[PR Review ROI Calculator]
+
+1. Does the PR reduce Write Amplification (WAF)?
+   - If yes (e.g. PR #2822 - DV Writes, WAF ~ O(1) instead of CoW WAF ~ 1,000,000x) -> High Priority.
+   
+2. Does the PR reduce Read Amplification (RAF)?
+   - If yes (e.g. PR #3124 - Compaction, resets RAF to 1.0) -> High Priority.
+   
+3. Does it break cross-language catalog interoperability?
+   - If yes (e.g. writing custom V3 features without format version gating) -> REJECT IMMEDIATELY.
+   
+4. Can single-node Python workers run it without OOM?
+   - If no (e.g. loads full table in Python object memory instead of Arrow C++) -> REJECT. Require batch-streaming dataset APIs.
+```
+
+---
+
+## 9. PyIceberg vs. Java Iceberg: Critical Maintenance Parity Gaps & Specifications
+
+While basic operations (like bin-pack compaction and metadata-only snapshot expiration) have active Python proposals, several vital safety gates, planning heuristics, and optimization algorithms from Java Iceberg are omitted in current PyIceberg designs. This section identifies the five critical parity gaps that must be resolved to build a production-grade maintenance suite.
+
+### 9.1 Gap 1: The GC-Enabled Safety Gate (`gc.enabled`)
+
+In Java, `gc.enabled` (default `true`) is a table-level boolean property. If a catalog administrator sets `gc.enabled = false`, operations like `ExpireSnapshots` and `DeleteOrphanFiles` **must never** physically delete data or metadata files from physical object storage. 
+
+If this safety gate is missing, PyIceberg could physically delete storage objects in shared environments where an external system manages history, leading to catastrophic, irreversible data loss.
+
+#### 💡 Concept Mapping & Plain English Explanations
+| Variable / Symbol | Concept Name | Plain English Translation |
+| :---: | :--- | :--- |
+| **`gc.enabled`** | **Concept 30**: Garbage Collection Enabled Gate | A master boolean switch in the table properties. If false, it blocks any physical file deletion from disk or S3, keeping storage completely untouched even if metadata is pruned. |
+
+#### 📊 Visual Logic Flow: GC-Gate Verification
+Below is the evaluation pipeline that the PyIceberg client must execute before issuing delete commands to `FileIO`:
+
+```mermaid
+flowchart TD
+    StartCleanup([Start Physical File Cleanup]) --> FetchProps[Read Table Properties]
+    FetchProps --> CheckGC{Is gc.enabled == true?}
+    
+    CheckGC -->|No: False| LogWarning[Log warning: Physical deletion bypassed]
+    LogWarning --> CompleteBypass([Metadata-only action complete, physical files preserved])
+    
+    CheckGC -->|Yes: True / Default| RunDeletes[Scan unreferenced paths and issue FileIO.delete]
+    RunDeletes --> CompletePhysical([Files physically removed from object storage])
+```
+
+---
+
+### 9.2 Gap 2: Orphan File Grace Period (`olderThan`)
+
+A naive orphan file pruner lists all physical files in the table's directory, cross-references them against active manifests, and deletes the unreferenced ones. 
+
+However, because write transactions are distributed and asynchronous, active writers write Parquet files to S3 **before** committing their metadata changes to the catalog. If `delete_orphan_files` is executed concurrently with a write transaction, it will aggressively delete these uncommitted active files, corrupting the concurrent write path.
+
+#### 💡 Concept Mapping & Plain English Explanations
+| Variable / Symbol | Concept Name | Plain English Translation |
+| :---: | :--- | :--- |
+| **`olderThan`** | **Concept 31**: Orphan Grace Period | A time threshold (e.g. 24 hours). Files written more recently than this grace period are kept safe, protecting active writers that haven't finished committing their changes. |
+
+#### 📊 Visual Timeline: The Writing-Compaction Race Condition
+The timeline below illustrates how the absence of a grace period causes write failures:
+
+```
+[Timeline of a Corrupting Race Condition: No Grace Period]
+t1: Client A starts transaction. Writes s3://bucket/part-0.parquet (Active, but uncommitted).
+t2: Client B starts Orphan File Pruner. Scans S3 directory, finds part-0.parquet.
+t3: Client B reads Table Metadata. part-0.parquet is NOT referenced yet.
+t4: Client B deletes s3://bucket/part-0.parquet from S3.
+t5: Client A attempts to commit catalog transaction referencing part-0.parquet.
+t6: TRANSACTION FAILED / CORRUPT: Physical file is missing from storage!
+
+[Timeline of a Safe Transaction: Enforced Grace Period (e.g., 24h)]
+t1: Client A starts transaction. Writes s3://bucket/part-0.parquet (Mtime = 12:00:00).
+t2: Client B starts Orphan File Pruner at 12:05:00.
+t3: Pruner checks: Is part-0.parquet older than (12:05:00 - 24 hours)? -> No (only 5 mins old).
+t4: Pruner skips deletion of part-0.parquet, keeping the active write safe.
+t5: Client A successfully commits catalog transaction.
+```
+
+---
+
+### 9.3 Gap 3: Advanced Compaction Strategies (Sort & Z-Order)
+
+PyIceberg PR #3124 only provides a basic **BinPack Strategy**. Bin-packing consolidates files but does not alter the physical sorting layout of rows. 
+
+In Java, the compaction actions expose **Sort** and **Z-Order** strategies. These sort data on disk, which drastically optimizes analytical query filters by grouping related data into tight, contiguous ranges. This allows query engines (like PyArrow, DuckDB, or Trino) to skip reading entire row groups via min/max dictionary index pruning.
+
+#### 💡 Concept Mapping & Plain English Explanations
+| Variable / Symbol | Concept Name | Plain English Translation |
+| :---: | :--- | :--- |
+| **$Z(\mathbf{x})$** | **Concept 32**: Z-Order Multidimensional Sort | A technique that maps multi-dimensional query keys (like `lat` and `lon`) into a single dimension by interleaving their bits. This keeps related data clustered together on disk, accelerating spatial and composite queries. |
+
+#### 📊 Visual Clustering: BinPack vs. Z-Order Layouts
+Assume a table contains two columns: `x` (integer range 0-3) and `y` (integer range 0-3), yielding a 2D data space. Let's see how they are laid out across 4 files:
+
+##### 1. BinPack Layout (No sorting, arbitrary distribution)
+```
+File 1: [(0,3), (3,0), (1,2)]  --> Min/Max X: [0, 3], Min/Max Y: [0, 3] (Reads everything)
+File 2: [(1,0), (2,3), (0,1)]  --> Min/Max X: [0, 2], Min/Max Y: [0, 3] (Reads everything)
+File 3: [(2,1), (3,2), (0,0)]  --> Min/Max X: [0, 3], Min/Max Y: [0, 2] (Reads everything)
+File 4: [(1,3), (2,0), (3,3)]  --> Min/Max X: [1, 3], Min/Max Y: [0, 3] (Reads everything)
+```
+*   **Result**: Every file's column boundaries cover the entire coordinate space. The engine must scan **100%** of files for any query filters (e.g. `x = 3`).
+
+##### 2. Z-Order Layout (Spatially clustered via bit-interleaving)
+```
+File 1 (Quadrant 0): [(0,0), (0,1), (1,0), (1,1)] --> Min/Max X: [0, 1], Min/Max Y: [0, 1]
+File 2 (Quadrant 1): [(2,0), (2,1), (3,0), (3,1)] --> Min/Max X: [2, 3], Min/Max Y: [0, 1]
+File 3 (Quadrant 2): [(0,2), (0,3), (1,2), (1,3)] --> Min/Max X: [0, 1], Min/Max Y: [2, 3]
+File 4 (Quadrant 3): [(2,2), (2,3), (3,2), (3,3)] --> Min/Max X: [2, 3], Min/Max Y: [2, 3]
+```
+*   **Result**: If a query filters for `x = 3 AND y = 0`, the engine checks the min/max ranges and scans **ONLY File 2** (Quadrant 1), completely bypassing Files 1, 3, and 4. This yields an instant **75% reduction** in storage I/O read volume!
+
+---
+
+### 9.4 Gap 4: RewriteManifests Sizing and Automatic Partition Clustering
+
+Java's manifest compaction (`RewriteManifests`) aggregates tiny manifest files into a clean metadata layer. 
+
+A critical gap in PyIceberg's current manifest-writing logic is the absence of size-based clustering and boundary validation. Manifest files must be sized to fit within `manifest.target-size-bytes` (default 8MB) and clustered by partition boundaries to speed up scan planning.
+
+#### 💡 Concept Mapping & Plain English Explanations
+| Variable / Symbol | Concept Name | Plain English Translation |
+| :---: | :--- | :--- |
+| **`manifest.target-size-bytes`** | **Concept 33**: Manifest Target Size | The ideal maximum byte volume for a manifest file. Keeping manifests around this size ensures rapid scan planning without causing high overhead during reads. |
+
+---
+
+### 9.5 Gap 5: Actions / `MaintenanceTable` API Signature Parity
+
+To ensure cross-language developers can easily navigate PyIceberg, the Python client must align its entry point signatures with Java's fluent builder APIs. 
+
+The existing `MaintenanceTable` in `pyiceberg/table/maintenance.py` is extremely bare, exposing only `expire_snapshots()`. Below is the complete, production-grade API signature specification that must be implemented under `MaintenanceTable` to achieve functional parity:
+
+```python
+class MaintenanceTable:
+    """Production-grade PyIceberg Maintenance Table API.
+    
+    Exposes the complete table maintenance suite with strict safety gates.
+    """
+    _table: Table
+
+    def __init__(self, table: Table) -> None:
+        self._table = table
+
+    def expire_snapshots(self) -> ExpireSnapshots:
+        """Prunes historical snapshots.
+        
+        Note: The underlying implementation must respect table property `gc.enabled`.
+        If gc.enabled is False, physical deletions are bypassed.
+        """
+        from pyiceberg.table.update.snapshot import ExpireSnapshots
+        from pyiceberg.table import Transaction
+        return ExpireSnapshots(transaction=Transaction(self._table, autocommit=True))
+
+    def delete_orphan_files(self) -> DeleteOrphanFilesBuilder:
+        """Return a builder to discover and remove physical files left behind.
+        
+        Signatures:
+            .older_than(days=3) -> Configure grace period to prevent deleting active writes.
+            .location(path)    -> Restrict cleaning to a specific directory.
+            .execute()         -> Run safety checks (gc.enabled check) and clean files.
+        """
+        return DeleteOrphanFilesBuilder(self._table)
+
+    def rewrite_data_files(self) -> RewriteDataFilesBuilder:
+        """Return a builder to compact small fragmented data files into larger files.
+        
+        Signatures:
+            .strategy("binpack" | "sort" | "z-order") -> Configure row layout.
+            .sort_by(columns: list[str])              -> Specify keys for sorting.
+            .target_file_size_bytes(bytes: int)       -> Control written block sizes.
+            .execute()                                -> Run PyArrow C++ Dataset compaction.
+        """
+        return RewriteDataFilesBuilder(self._table)
+
+    def rewrite_manifests(self) -> RewriteManifestsBuilder:
+        """Return a builder to consolidate tiny manifest files in the metadata layer.
+        
+        Signatures:
+            .target_manifest_size_bytes(bytes: int)   -> Target size for manifests.
+            .execute()                                -> Cluster and rewrite metadata.
+        """
+        return RewriteManifestsBuilder(self._table)
+```
+

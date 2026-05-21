@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apache Iceberg Committer Operations Command Deck (ICOD) — Concurrency OCC Auditor</title>
+    <meta name="description" content="Simulate concurrent multi-writer commits, optimistic concurrency control validation, compaction stages, and physical object storage pruning.">
+    
+    <!-- Premium Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <i data-lucide="snowflake" class="logo-icon"></i>
+                </div>
+                <div class="brand-text">
+                    <span class="sub-brand">Iceberg Operations</span>
+                    <h1>ICOD Console</h1>
+                </div>
+            </div>
+            
+            <nav class="sidebar-menu">
+                <a href="index.html" class="nav-item" id="nav-dashboard">
+                    <span class="nav-number">01</span>
+                    <span>PR Review Hub</span>
+                </a>
+                <a href="spec-matrix.html" class="nav-item" id="nav-spec">
+                    <span class="nav-number">02</span>
+                    <span>Spec Matrix & Triage</span>
+                </a>
+                <a href="cookbook.html" class="nav-item" id="nav-cookbook">
+                    <span class="nav-number">03</span>
+                    <span>Formal Cookbook</span>
+                </a>
+                <a href="simulator.html" class="nav-item active" id="nav-simulator">
+                    <span class="nav-number">04</span>
+                    <span>Concurrency Auditor</span>
+                </a>
+                <a href="bindings.html" class="nav-item" id="nav-bindings">
+                    <span class="nav-number">05</span>
+                    <span>Bindings & Roadmap</span>
+                </a>
+                <a href="planner.html" class="nav-item" id="nav-planner">
+                    <span class="nav-number">06</span>
+                    <span>Amplification Planner</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="active-catalog-pill">
+                    <span class="indicator-dot pulse"></span>
+                    <span id="active-catalog-name">REST Catalog (Active)</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top Navbar with Breadcrumbs and Search -->
+            <header class="top-navbar">
+                <div class="wiki-breadcrumbs" style="margin-bottom: 0;">
+                    <span class="crumb">ICOD</span>
+                    <i data-lucide="chevron-right" class="crumb-separator"></i>
+                    <span class="crumb active">Concurrency Auditor</span>
+                </div>
+                <div class="nav-search" style="width: 240px;">
+                    <i data-lucide="search"></i>
+                    <input type="text" id="global-search" placeholder="Search logs...">
+                </div>
+            </header>
+
+            <!-- Main Scroll Container -->
+            <div class="pane-body-scroll">
+                <div class="wiki-grid">
+                    <!-- Left Column: Reading Article -->
+                    <article class="wiki-article">
+                        <section id="overview">
+                            <h1>Atomic Commit & Concurrency OCC Auditor</h1>
+                            <p class="pane-subtitle">Stage parallel transactions, trace catalog lock requests, audit collision checks, and evaluate compaction life-cycles.</p>
+                            
+                            <!-- Badges indicating the current state variables from the simulator script -->
+                            <div style="display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap;">
+                                <span class="chip" style="font-size: 10px; padding: 3px 8px; background: var(--g50);">
+                                    Version: <span id="navbar-spec-version" style="font-weight: 600;">V2 (OCC Enabled)</span>
+                                </span>
+                                <span class="chip attention" style="font-size: 10px; padding: 3px 8px;">
+                                    <span class="dot"></span>
+                                    Snapshot ID: <span id="navbar-snapshot-id" style="font-family: var(--mono); font-weight: 600;">N/A</span>
+                                </span>
+                                <span class="chip safe" style="font-size: 10px; padding: 3px 8px;">
+                                    <span class="dot"></span>
+                                    Sequence No: <span id="navbar-sequence-number" style="font-family: var(--mono); font-weight: 600;">0</span>
+                                </span>
+                            </div>
+
+                            <p>
+                                Optimistic Concurrency Control (OCC) is the core transaction model of Apache Iceberg. Writers perform operations in isolated staging spaces. Upon completion, they validate that files targeted for updates still exist and no concurrent modifications have advanced the table sequence. Finally, they commit the change atomically via a catalog pointer swap.
+                            </p>
+                        </section>
+
+                        <section id="auditor" style="margin-top: 40px;">
+                            <h2>Interactive OCC Commit Auditor</h2>
+                            <p>
+                                Use the control panel below to step through simulated transaction operations. Stage concurrent writes to view how Iceberg triggers overlap conflict detection and resolves collisions using <code>validateNoConflictingAppends</code> and <code>validateDeletedFiles</code>.
+                            </p>
+                            
+                            <!-- Figure Block wrapping the simulator layout -->
+                            <div class="figure-block">
+                                <div class="figure-content" style="padding: 24px;">
+                                    <div style="display: grid; grid-template-columns: 260px 1fr; gap: 24px; align-items: start;">
+                                        <!-- Controls column -->
+                                        <div class="controls-pane" style="display: flex; flex-direction: column; gap: 16px;">
+                                            <div style="background: var(--g50); padding: 16px; border-radius: 8px; border: 1.5px solid var(--g300);">
+                                                <h3 style="font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--slate); margin-top: 0; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+                                                    <i data-lucide="play-circle" style="width: 14px; height: 14px; color: var(--clay);"></i>
+                                                    Control Panel
+                                                </h3>
+
+                                                <div style="display: flex; flex-direction: column; gap: 12px;">
+                                                    <!-- Section 1: Base Appends -->
+                                                    <div>
+                                                        <h4 style="font-size: 9.5px; text-transform: uppercase; color: var(--g500); margin-bottom: 6px; letter-spacing: 0.05em; font-weight: 600;">1. Appends</h4>
+                                                        <button class="btn btn-outline-cyan w-full mb-2" id="btn-append-v1" onclick="simTrigger('append-v1')" style="text-align: left; padding: 6px 10px; font-size: 11.5px; display: flex; align-items: center; gap: 6px;">
+                                                            <i data-lucide="plus-circle" style="width: 12px; height: 12px;"></i> Append Data (Seq 1)
+                                                        </button>
+                                                        <button class="btn btn-outline-cyan w-full" onclick="simTrigger('append-v2')" id="btn-append-v2" disabled style="text-align: left; padding: 6px 10px; font-size: 11.5px; display: flex; align-items: center; gap: 6px;">
+                                                            <i data-lucide="plus-circle" style="width: 12px; height: 12px;"></i> Append Data (Seq 2)
+                                                        </button>
+                                                    </div>
+
+                                                    <!-- Section 2: OCC Deltas -->
+                                                    <div>
+                                                        <h4 style="font-size: 9.5px; text-transform: uppercase; color: var(--g500); margin-bottom: 6px; letter-spacing: 0.05em; font-weight: 600;">2. Concurrent Writes</h4>
+                                                        <button class="btn btn-outline-purple w-full mb-2" onclick="simTrigger('stage-concurrent')" id="btn-stage-concurrent" disabled style="text-align: left; padding: 6px 10px; font-size: 11.5px; display: flex; align-items: center; gap: 6px;">
+                                                            <i data-lucide="git-branch" style="width: 12px; height: 12px;"></i> Stage Concurrent
+                                                        </button>
+                                                        <div class="button-split mt-2" id="split-concurrent-buttons" style="display: none; grid-template-columns: 1fr 1fr; gap: 6px;">
+                                                            <button class="btn btn-success text-xs" onclick="simTrigger('commit-append')" style="padding: 4px 6px; font-size: 10px;">
+                                                                Commit B (App)
+                                                            </button>
+                                                            <button class="btn btn-danger text-xs" onclick="simTrigger('commit-delete')" style="padding: 4px 6px; font-size: 10px;">
+                                                                Commit A (Del)
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    <!-- Section 3: Compact & GC -->
+                                                    <div>
+                                                        <h4 style="font-size: 9.5px; text-transform: uppercase; color: var(--g500); margin-bottom: 6px; letter-spacing: 0.05em; font-weight: 600;">3. Maintenance</h4>
+                                                        <button class="btn btn-outline-purple w-full mb-2" onclick="simTrigger('compact')" id="btn-compact" disabled style="text-align: left; padding: 6px 10px; font-size: 11.5px; display: flex; align-items: center; gap: 6px;">
+                                                            <i data-lucide="compress" style="width: 12px; height: 12px;"></i> Compaction (REPLACE)
+                                                        </button>
+                                                        <button class="btn btn-outline-rose w-full mb-2" onclick="simTrigger('expire')" id="btn-expire" disabled style="text-align: left; padding: 6px 10px; font-size: 11.5px; display: flex; align-items: center; gap: 6px;">
+                                                            <i data-lucide="history" style="width: 12px; height: 12px;"></i> Expire Snapshots
+                                                        </button>
+                                                        <button class="btn btn-outline-amber w-full" onclick="simTrigger('orphan')" id="btn-orphan" disabled style="text-align: left; padding: 6px 10px; font-size: 11.5px; display: flex; align-items: center; gap: 6px;">
+                                                            <i data-lucide="trash-2" style="width: 12px; height: 12px;"></i> Prune (GC)
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Tree visualizer column -->
+                                        <div class="visualizer-pane" style="display: flex; flex-direction: column; min-height: 400px; border-left: 1.5px solid var(--g300); padding-left: 20px;">
+                                            <h3 style="font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--slate); margin-top: 0; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+                                                <i data-lucide="network" style="width: 14px; height: 14px; color: var(--clay);"></i>
+                                                Table Specification Tree Invariants
+                                            </h3>
+                                            <div class="visualizer-body" id="viz-tree-container" style="flex: 1; min-height: 350px;">
+                                                <!-- Visual Tree rendered dynamically via JS -->
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Bottom logs row inside the figure -->
+                                    <div style="margin-top: 24px; border-top: 1.5px solid var(--g300); padding-top: 16px;">
+                                        <h4 style="font-size: 10px; text-transform: uppercase; color: var(--g500); margin-bottom: 8px; letter-spacing: 0.05em; font-weight: 600;">Verification Log Stream</h4>
+                                        <div class="terminal-box" id="sim-log-box" style="height: 140px; overflow-y: auto;">
+                                            <div class="log-line success">[SYSTEM] OCC Simulator initialized. Catalog active on table 'db.iceberg_table'.</div>
+                                            <div class="log-line">[SYSTEM] Ready. Click "Append Data (Seq 1)" to initialize table structure.</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="figure-caption">
+                                    <span class="fig-num">Figure 4.1:</span> Concurrency OCC Lifecycle Auditor, illustrating real-time physical file additions, logical deletes, and timeline progression.
+                                </div>
+                            </div>
+                        </section>
+                    </article>
+
+                    <!-- Right Column: Sticky Outline Navigator -->
+                    <aside class="wiki-outline">
+                        <div class="outline-sticky">
+                            <h4>On This Page</h4>
+                            <nav class="outline-nav">
+                                <a href="#overview" class="active">Overview</a>
+                                <a href="#auditor">OCC Commit Auditor</a>
+                            </nav>
+                            <div style="margin-top: 32px; border-top: 1.5px solid var(--g200); padding-top: 16px;">
+                                <button class="btn btn-xs btn-outline-rose w-full" onclick="resetSimulator()" style="font-size: 11px; padding: 6px 12px; border-radius: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1.5px solid var(--g300); background: var(--paper); cursor: pointer; color: var(--slate); font-weight: 600; font-family: var(--sans);">
+                                    <i data-lucide="rotate-ccw" style="width: 12px; height: 12px;"></i> Reset Simulator
+                                </button>
+                            </div>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Page Specific Script -->
+    <script src="simulator.js"></script>
+</body>
+</html>

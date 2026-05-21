@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apache Iceberg Committer Operations Command Deck (ICOD) — Amplification Planner</title>
+    <meta name="description" content="Model copy-on-write vs merge-on-read mathematically to forecast write amplification, read overheads, and Arrow client memory limits.">
+    
+    <!-- Premium Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <i data-lucide="snowflake" class="logo-icon"></i>
+                </div>
+                <div class="brand-text">
+                    <span class="sub-brand">Iceberg Operations</span>
+                    <h1>ICOD Console</h1>
+                </div>
+            </div>
+            
+            <nav class="sidebar-menu">
+                <a href="index.html" class="nav-item" id="nav-dashboard">
+                    <span class="nav-number">01</span>
+                    <span>PR Review Hub</span>
+                </a>
+                <a href="spec-matrix.html" class="nav-item" id="nav-spec">
+                    <span class="nav-number">02</span>
+                    <span>Spec Matrix & Triage</span>
+                </a>
+                <a href="cookbook.html" class="nav-item" id="nav-cookbook">
+                    <span class="nav-number">03</span>
+                    <span>Formal Cookbook</span>
+                </a>
+                <a href="simulator.html" class="nav-item" id="nav-simulator">
+                    <span class="nav-number">04</span>
+                    <span>Concurrency Auditor</span>
+                </a>
+                <a href="bindings.html" class="nav-item" id="nav-bindings">
+                    <span class="nav-number">05</span>
+                    <span>Bindings & Roadmap</span>
+                </a>
+                <a href="planner.html" class="nav-item active" id="nav-planner">
+                    <span class="nav-number">06</span>
+                    <span>Amplification Planner</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="active-catalog-pill">
+                    <span class="indicator-dot pulse"></span>
+                    <span id="active-catalog-name">REST Catalog (Active)</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Top Navbar with Breadcrumbs and Search -->
+            <header class="top-navbar">
+                <div class="wiki-breadcrumbs" style="margin-bottom: 0;">
+                    <span class="crumb">ICOD</span>
+                    <i data-lucide="chevron-right" class="crumb-separator"></i>
+                    <span class="crumb active">Amplification Planner</span>
+                </div>
+                <div class="nav-search" style="width: 240px;">
+                    <i data-lucide="search"></i>
+                    <input type="text" id="global-search" placeholder="Search parameters...">
+                </div>
+            </header>
+
+            <!-- Main Scroll Container -->
+            <div class="pane-body-scroll">
+                <div class="wiki-grid">
+                    <!-- Left Column: Reading Article -->
+                    <article class="wiki-article">
+                        <section id="overview">
+                            <h1>Write/Read Amplification & JVM Memory Advisor</h1>
+                            <p class="pane-subtitle">Model layout strategies mathematically to predict physical write amplification, read scan overheads, and JVM/Arrow client memory limits.</p>
+                            
+                            <!-- Badges indicating the current state variables from the planner script -->
+                            <div style="display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap;">
+                                <span class="chip" style="font-size: 10px; padding: 3px 8px; background: var(--g50);">
+                                    Engine: <span id="navbar-spec-version" style="font-weight: 600;">WAF/RAF Engine</span>
+                                </span>
+                                <span class="chip safe" style="font-size: 10px; padding: 3px 8px;">
+                                    <span class="dot"></span>
+                                    Status: <span id="navbar-snapshot-id" style="font-weight: 600;">Ready</span>
+                                </span>
+                                <span class="chip attention" style="font-size: 10px; padding: 3px 8px;">
+                                    <span class="dot"></span>
+                                    Model: <span id="navbar-sequence-number" style="font-weight: 600;">Active</span>
+                                </span>
+                            </div>
+
+                            <!-- Alert Banner outlining planner objectives -->
+                            <div class="alert-banner info">
+                                <i data-lucide="sliders" style="color: var(--clay); flex-shrink: 0; width: 16px; height: 16px; margin-top: 2px;"></i>
+                                <div>
+                                    <div class="alert-title">Principal Architectural Layout Strategy</div>
+                                    Reviewers must balance write cost against read query seek penalties. Adjust the slider metrics below to model storage write/read overhead ratios and JVM Heap limits.
+                                </div>
+                            </div>
+
+                            <p>
+                                Every core transaction committed to the catalog affects downstream query engine performance. Choosing between Copy-on-Write (CoW) and Merge-on-Read (MoR) involves a mathematical tradeoff between write latency (WAF) and read seek overheads (RAF). Under high client concurrency, loading uncompressed delete file pointers into JVM memory can quickly lead to OutOfMemory (OOM) errors.
+                            </p>
+                        </section>
+
+                        <section id="modeling-inputs" style="margin-top: 40px;">
+                            <h2>Interactive Layout Modeling Heuristics</h2>
+                            <p>
+                                Adjust the parameters in the modeling console below to dynamically estimate write/read amplification rates and JVM heap footprint. Run scenarios to find the optimal compaction and update settings.
+                            </p>
+                            
+                            <!-- Figure Block wrapping the dual column planning workspace -->
+                            <div class="figure-block">
+                                <div class="figure-content" style="padding: 24px;">
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start;">
+                                        
+                                        <!-- Left Side: Interactive Sliders -->
+                                        <div>
+                                            <h3 style="font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--slate); margin-top: 0; margin-bottom: 16px; border-bottom: 1.5px solid var(--g200); padding-bottom: 6px;">
+                                                Layout Modeling Parameters
+                                            </h3>
+                                            
+                                            <!-- Write Strategy -->
+                                            <div class="slider-group" style="margin-bottom: 16px;">
+                                                <label style="font-size: 11px; font-weight: 600; color: var(--g700); display: block; margin-bottom: 6px;">Write Strategy</label>
+                                                <select id="plan-mutation-type" onchange="runPlanningCalculation()" style="width: 100%; padding: 6px 10px; border: 1.5px solid var(--g300); border-radius: 6px; background: var(--paper); font-size: 12px; color: var(--slate); outline: none;">
+                                                    <option value="cow">Copy-on-Write (CoW)</option>
+                                                    <option value="mor-pos" selected>Merge-on-Read (MoR) - Positional deletes</option>
+                                                    <option value="mor-dv">Merge-on-Read (MoR) - Deletion Vectors (Roaring Bitmaps)</option>
+                                                </select>
+                                            </div>
+
+                                            <!-- Slider 1: Average Data File Size -->
+                                            <div class="slider-group" style="margin-bottom: 16px;">
+                                                <div class="slider-label-row" style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; margin-bottom: 4px;">
+                                                    <label for="plan-file-size" style="color: var(--g700);">Average Data File Size</label>
+                                                    <span id="label-file-size" style="font-family: var(--mono); color: var(--clay);">128 MB</span>
+                                                </div>
+                                                <input type="range" id="plan-file-size" class="input-slider" min="32" max="1024" step="32" value="128" oninput="runPlanningCalculation()" style="width: 100%; cursor: pointer;">
+                                            </div>
+
+                                            <!-- Slider 2: Mutated Rows per Transaction -->
+                                            <div class="slider-group" style="margin-bottom: 16px;">
+                                                <div class="slider-label-row" style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; margin-bottom: 4px;">
+                                                    <label for="plan-mutated-rows" style="color: var(--g700);">Mutated Rows per Transaction</label>
+                                                    <span id="label-mutated-rows" style="font-family: var(--mono); color: var(--clay);">5,000</span>
+                                                </div>
+                                                <input type="range" id="plan-mutated-rows" class="input-slider" min="100" max="50000" step="100" value="5000" oninput="runPlanningCalculation()" style="width: 100%; cursor: pointer;">
+                                            </div>
+
+                                            <!-- Slider 3: Commits Before Compaction -->
+                                            <div class="slider-group" style="margin-bottom: 16px;">
+                                                <div class="slider-label-row" style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; margin-bottom: 4px;">
+                                                    <label for="plan-concurrency-factor" style="color: var(--g700);">Commits Before Compaction</label>
+                                                    <span id="label-concurrency-factor" style="font-family: var(--mono); color: var(--clay);">5</span>
+                                                </div>
+                                                <input type="range" id="plan-concurrency-factor" class="input-slider" min="1" max="50" step="1" value="5" oninput="runPlanningCalculation()" style="width: 100%; cursor: pointer;">
+                                            </div>
+                                        </div>
+
+                                        <!-- Right Side: Metrics Dashboard and Recommendations -->
+                                        <div style="border-left: 1.5px solid var(--g300); padding-left: 32px; display: flex; flex-direction: column; gap: 20px;">
+                                            <h3 style="font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--slate); margin-top: 0; margin-bottom: 0; border-bottom: 1.5px solid var(--g200); padding-bottom: 6px;">
+                                                Calculated Amplification Metrics
+                                            </h3>
+
+                                            <div class="metric-grid-card" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 0;">
+                                                <!-- WAF -->
+                                                <div class="metric-box" style="background: var(--g50); border: 1.5px solid var(--g300); border-radius: 8px; padding: 12px; text-align: center;">
+                                                    <h5 style="font-size: 10px; text-transform: uppercase; color: var(--g500); margin: 0 0 6px;">Write Amp</h5>
+                                                    <div class="val" id="plan-waf-val" style="font-family: var(--mono); font-size: 18px; font-weight: 700; color: var(--slate);">1.0x</div>
+                                                </div>
+
+                                                <!-- RAF -->
+                                                <div class="metric-box" style="background: var(--g50); border: 1.5px solid var(--g300); border-radius: 8px; padding: 12px; text-align: center;">
+                                                    <h5 style="font-size: 10px; text-transform: uppercase; color: var(--g500); margin: 0 0 6px;">Read Amp</h5>
+                                                    <div class="val" id="plan-raf-val" style="font-family: var(--mono); font-size: 18px; font-weight: 700; color: var(--slate);">1.0x</div>
+                                                </div>
+
+                                                <!-- RAM -->
+                                                <div class="metric-box" style="background: var(--g50); border: 1.5px solid var(--g300); border-radius: 8px; padding: 12px; text-align: center;">
+                                                    <h5 style="font-size: 10px; text-transform: uppercase; color: var(--g500); margin: 0 0 6px;">JVM Heap</h5>
+                                                    <div class="val" id="plan-ram-val" style="font-family: var(--mono); font-size: 18px; font-weight: 700; color: var(--slate);">Low</div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Dynamic Architectural Advisory Card -->
+                                            <div id="plan-recommendation-container" style="display: flex; flex-direction: column; justify-content: center; min-height: 120px;">
+                                                <!-- Dynamic advisory-card renders here -->
+                                            </div>
+                                        </div>
+
+                                    </div>
+                                </div>
+                                <div class="figure-caption">
+                                    <span class="fig-num">Figure 6.1:</span> WAF/RAF Capacity & Heap Allocation Heuristics Advisor, generating automated principal-level layout configurations.
+                                </div>
+                            </div>
+                        </section>
+                    </article>
+
+                    <!-- Right Column: Sticky Outline Navigator -->
+                    <aside class="wiki-outline">
+                        <div class="outline-sticky">
+                            <h4>On This Page</h4>
+                            <nav class="outline-nav">
+                                <a href="#overview" class="active">Overview</a>
+                                <a href="#modeling-inputs">Modeling Console</a>
+                            </nav>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Page Specific Script -->
+    <script src="planner.js"></script>
+</body>
+</html>
