@@ -69,6 +69,12 @@ document.addEventListener("DOMContentLoaded", () => {
       items: [
         { name: "Binding Parity Matrix", path: "audit-matrix.html" }
       ]
+    },
+    {
+      category: "Wiki Roadmap",
+      items: [
+        { name: "Site Improvements", path: "todo.html" }
+      ]
     }
   ];
 

@@ -229,7 +229,9 @@ body.layout-wide main.wiki-content header,
 body.layout-wide main.wiki-content p,
 body.layout-wide main.wiki-content ul,
 body.layout-wide main.wiki-content ol,
-body.layout-wide main.wiki-content section > h3 {
+body.layout-wide main.wiki-content section > h3,
+body.layout-wide main.wiki-content .tagline,
+body.layout-wide main.wiki-content .recipe-container {
   max-width: 100%;
 }
 
