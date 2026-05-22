@@ -1231,6 +1231,27 @@ table.parity-table tr:last-child td {
 .badge-status.not_planned { background: var(--g100); color: var(--g500); border: 1px solid var(--g300); }
 .badge-status.bot { background: #E2F0FE; color: #1A56DB; border: 1px solid #A4CAFE; }
 
+/* Language Binding Badges */
+.badge-binding {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-family: var(--mono);
+  border: 1px solid transparent;
+  vertical-align: middle;
+}
+.badge-binding.java { background: #FAF0E6; color: #8B4513; border: 1px solid #CD853F; }
+.badge-binding.python { background: #EBF5FB; color: #1F618D; border: 1px solid #5DADE2; }
+.badge-binding.rust { background: #FAF2F0; color: #A04000; border: 1px solid #DC7633; }
+.badge-binding.go { background: #E8F8F5; color: #117864; border: 1px solid #48C9B0; }
+.badge-binding.cpp { background: #F5EEF8; color: #6C3483; border: 1px solid #AF7AC5; }
+.badge-binding.core { background: #F2F4F4; color: #5D6D7E; border: 1px solid #BDC3C7; }
+
+
 
 /* References / Connection Web Panel */
 .gh-detail-section {

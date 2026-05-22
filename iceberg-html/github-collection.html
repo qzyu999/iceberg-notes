@@ -88,6 +88,18 @@
             </div>
 
             <div class="input-group">
+              <label for="man-binding">Binding / Language</label>
+              <select id="man-binding" class="filter-select" style="width: 100%; height: 38px; border: 1.5px solid var(--g300); border-radius: 8px;">
+                <option value="core">None / Core Spec</option>
+                <option value="java">Java</option>
+                <option value="python">Python</option>
+                <option value="rust">Rust</option>
+                <option value="go">Go</option>
+                <option value="cpp">C++</option>
+              </select>
+            </div>
+
+            <div class="input-group">
               <label for="man-author">Author</label>
               <input type="text" id="man-author" class="input-control" placeholder="e.g. rdblue">
             </div>
@@ -128,6 +140,15 @@
                 <option value="open">🟢 Open</option>
                 <option value="closed">🔴 Closed</option>
                 <option value="merged">🟣 Merged</option>
+              </select>
+              <select id="filter-binding" class="filter-select" onchange="renderBoard()">
+                <option value="all">All Bindings</option>
+                <option value="core">🌐 Core / Spec</option>
+                <option value="java">☕ Java</option>
+                <option value="python">🐍 Python</option>
+                <option value="rust">🦀 Rust</option>
+                <option value="go">🐹 Go</option>
+                <option value="cpp">👾 C++</option>
               </select>
             </div>
           </div>
@@ -193,6 +214,25 @@
       }
     }
 
+    // Automatically detect binding based on url patterns and content heuristics
+    function detectBinding(url, title, body) {
+      const lowerUrl = (url || "").toLowerCase();
+      if (lowerUrl.includes("iceberg-python")) return "python";
+      if (lowerUrl.includes("iceberg-rust")) return "rust";
+      if (lowerUrl.includes("iceberg-go")) return "go";
+      if (lowerUrl.includes("iceberg-cpp")) return "cpp";
+      
+      const text = `${title} ${body}`.toLowerCase();
+      if (text.includes("pyiceberg") || text.includes("python")) return "python";
+      if (text.includes("rust") || text.includes("iceberg-rust")) return "rust";
+      if (text.includes("golang") || text.includes("iceberg-go")) return "go";
+      if (text.includes("iceberg-cpp") || text.includes("c++")) return "cpp";
+      if (text.includes("java")) return "java";
+      if (lowerUrl.includes("apache/iceberg/")) return "java"; // Main repo defaults to java
+      
+      return "core";
+    }
+
     // Load initial collection on startup
     async function loadCollection() {
       // 1. Recover from localStorage
@@ -209,6 +249,13 @@
           localStorage.setItem("wiki-github-collection", JSON.stringify(ghDatabase));
         }
       }
+
+      // Ensure backward compatibility by applying default detected binding if missing
+      ghDatabase.forEach(item => {
+        if (!item.binding) {
+          item.binding = detectBinding(item.url || "", item.title || "", item.body || "");
+        }
+      });
 
       rebuildRelationships();
       renderBoard();
@@ -298,8 +345,42 @@
         let itemState = "open";
 
         if (isDiscussion) {
-          // Public API doesn't fully expose Discussions without GraphQL, fallback to mock details or manual input
-          throw new Error("GitHub Discussions endpoint requires authenticated GraphQL. Please enter details manually using the 'Manual Entry' tab or import the sample dataset to view Discussions.");
+          // Public API doesn't fully expose Discussions without GraphQL.
+          // To provide a friction-free UX, we gracefully auto-generate a placeholder resource and select it, 
+          // allowing the user to view, edit, and reference it immediately.
+          const detectedBinding = detectBinding(urlInput.value, `${repo} Discussion #${number}`, "");
+          const newResource = {
+            number: String(number),
+            title: `${repo} Discussion #${number}`,
+            type: "discussion",
+            state: "open",
+            stateReason: null,
+            binding: detectedBinding,
+            author: "github-community",
+            body: `Automatically created placeholder for Discussion #${number} in ${owner}/${repo}.\n\nYou can edit this title, author, state, or description using the 'Manual Entry' tab with number ${number}, or customize the binding inline.`,
+            url: urlInput.value,
+            incoming: [],
+            outgoing: []
+          };
+
+          // De-duplicate items
+          ghDatabase = ghDatabase.filter(item => item.number !== newResource.number);
+          ghDatabase.unshift(newResource);
+
+          rebuildRelationships();
+          await saveCollection();
+          renderBoard();
+          selectResource(newResource.number);
+
+          urlInput.value = "";
+          loader.style.display = "none";
+
+          errorDiv.style.background = "#EBF5FB";
+          errorDiv.style.color = "#1F618D";
+          errorDiv.style.borderColor = "#5DADE2";
+          errorDiv.textContent = `ℹ️ GitHub Discussions require GraphQL API authentication, so a placeholder entry for #${number} has been automatically created. You can customize its title and body in the 'Manual Entry' tab using issue #${number}.`;
+          errorDiv.style.display = "block";
+          return;
         }
 
         // Fetch standard issue endpoint
@@ -353,6 +434,8 @@
           }
         }
 
+        const detectedBinding = detectBinding(data.html_url || urlInput.value, data.title, data.body || "");
+
         // Push new record
         const newResource = {
           number: String(number),
@@ -360,6 +443,7 @@
           type: itemType,
           state: itemState,
           stateReason: stateReason,
+          binding: detectedBinding,
           author: data.user.login,
           body: data.body || "",
           url: data.html_url || `https://github.com/${owner}/${repo}/${itemType === 'pr' ? 'pull' : 'issues'}/${number}`,
@@ -391,6 +475,7 @@
       const titleInput = document.getElementById("man-title");
       const typeSelect = document.getElementById("man-type");
       const stateSelect = document.getElementById("man-state");
+      const bindingSelect = document.getElementById("man-binding");
       const authorInput = document.getElementById("man-author");
       const bodyInput = document.getElementById("man-body");
 
@@ -413,6 +498,7 @@
         type: typeSelect.value,
         state: stateSelect.value,
         stateReason: stateReason,
+        binding: bindingSelect.value,
         author: authorInput.value.trim() || "anonymous",
         body: bodyInput.value || "",
         url: `https://github.com/apache/iceberg/${typeSelect.value === 'pr' ? 'pull' : (typeSelect.value === 'discussion' ? 'discussions' : 'issues')}/${numberStr}`,
@@ -434,6 +520,7 @@
       titleInput.value = "";
       authorInput.value = "";
       bodyInput.value = "";
+      bindingSelect.value = "core";
       
       // Reset state reason selection
       document.getElementById("man-state-reason").value = "completed";
@@ -491,6 +578,16 @@
       renderDetailPanel(selectedItem);
     }
 
+    // Inline update for resource bindings
+    async function updateResourceBinding(number, newBinding) {
+      const item = ghDatabase.find(t => t.number === String(number));
+      if (item) {
+        item.binding = newBinding;
+        await saveCollection();
+        renderBoard();
+      }
+    }
+
     // Detail Panel and Connection Diagram compiler
     function renderDetailPanel(item) {
       const panel = document.getElementById("github-detail-panel");
@@ -511,12 +608,14 @@
         return numbers.map(num => {
           const target = ghDatabase.find(t => t.number === num);
           const typeLabel = target ? target.type.toUpperCase() : "ITEM";
+          const bindingVal = target ? (target.binding || "core") : "core";
           const titleText = target ? target.title : `Resource #${num}`;
           return `
             <div class="ref-pill" title="${titleText}" onclick="selectResource('${num}')">
               <span class="badge-type ${target ? target.type : 'issue'}" style="font-size: 9px; padding: 1px 4px;">${typeLabel}</span>
+              <span class="badge-binding ${bindingVal}" style="font-size: 8px; padding: 1px 3px;">${bindingVal}</span>
               <strong>#${num}</strong>
-              <span style="max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px;">
+              <span style="max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px;">
                 ${titleText}
               </span>
             </div>
@@ -556,8 +655,20 @@
               </a>
             </div>
           </div>
-          <div style="font-size: 12px; color: var(--g500); margin-top: 6px; font-family: var(--mono);">
-            Registered by: <strong>@${item.author}</strong>
+          <div style="font-size: 12px; color: var(--g500); margin-top: 6px; font-family: var(--mono); display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <span>Registered by: <strong>@${item.author}</strong></span>
+            <span style="color: var(--g300);">|</span>
+            <div style="display: inline-flex; align-items: center; gap: 6px;">
+              <span>Binding:</span>
+              <select class="filter-select" style="height: 24px; font-size: 11px; padding: 1px 4px; border-radius: 6px; border: 1.5px solid var(--g300);" onchange="updateResourceBinding('${item.number}', this.value)">
+                <option value="core" ${item.binding === 'core' ? 'selected' : ''}>🌐 Core / Spec</option>
+                <option value="java" ${item.binding === 'java' ? 'selected' : ''}>☕ Java</option>
+                <option value="python" ${item.binding === 'python' ? 'selected' : ''}>🐍 Python</option>
+                <option value="rust" ${item.binding === 'rust' ? 'selected' : ''}>🦀 Rust</option>
+                <option value="go" ${item.binding === 'go' ? 'selected' : ''}>🐹 Go</option>
+                <option value="cpp" ${item.binding === 'cpp' ? 'selected' : ''}>👾 C++</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -581,6 +692,7 @@
               <div class="relation-pills">
                 <div class="ref-pill active-node" style="border-color: var(--clay); box-shadow: 0 2px 8px rgba(217, 119, 87, 0.15);">
                   <span class="badge-type ${item.type}">${item.type}</span>
+                  <span class="badge-binding ${item.binding || 'core'}">${item.binding || 'core'}</span>
                   <strong>#${item.number}</strong>
                   <span style="font-weight: 600;">${item.title}</span>
                 </div>
@@ -614,6 +726,7 @@
       const searchVal = document.getElementById("gh-search").value.toLowerCase().trim();
       const typeFilter = document.getElementById("filter-type").value;
       const stateFilter = document.getElementById("filter-state").value;
+      const bindingFilter = document.getElementById("filter-binding").value;
 
       let filtered = ghDatabase;
 
@@ -631,6 +744,9 @@
       if (stateFilter !== "all") {
         filtered = filtered.filter(item => item.state === stateFilter);
       }
+      if (bindingFilter !== "all") {
+        filtered = filtered.filter(item => (item.binding || "core") === bindingFilter);
+      }
 
       if (filtered.length === 0) {
         grid.innerHTML = `
@@ -646,6 +762,7 @@
 
       grid.innerHTML = filtered.map(item => {
         const { stateClass, stateLabel } = getStatusBadgeDetails(item);
+        const bindingVal = item.binding || "core";
 
         const isSelected = String(item.number) === selectedNumber;
 
@@ -654,6 +771,7 @@
             <div class="gh-card-header">
               <div class="gh-card-meta">
                 <span class="badge-type ${item.type}">${item.type}</span>
+                <span class="badge-binding ${bindingVal}">${bindingVal}</span>
                 <span class="gh-card-number">#${item.number}</span>
               </div>
               <span class="badge-status ${stateClass}" style="font-size: 9px; padding: 1px 6px;">${stateLabel}</span>
@@ -689,6 +807,7 @@
           title: "Core: Add nanosecond timestamp support to Spec v3",
           type: "pr",
           state: "open",
+          binding: "core",
           author: "aokolnychyi",
           body: "Implements the core spec requirements described in #9201. Adds nanosecond resolution storage mappings and test integrations. Closes #9201. Depends on final consensus in RFC discussion #9150.",
           url: "https://github.com/apache/iceberg/pull/9280",
@@ -700,6 +819,7 @@
           title: "Python: Implement V3 nanosecond timestamp reads",
           type: "pr",
           state: "merged",
+          binding: "python",
           author: "fokko",
           body: "Brings Python bindings to parity with core Java changes. Implements V3 nanosecond resolution schema parser and projections. Addresses #9201. Closes #9201. Closes #9120. Tested against core local outputs.",
           url: "https://github.com/apache/iceberg/pull/9250",
@@ -711,6 +831,7 @@
           title: "Support Nanosecond Timestamp Resolution in Spec v3",
           type: "issue",
           state: "open",
+          binding: "core",
           author: "rdblue",
           body: "Currently, the Iceberg V1 and V2 specs only permit microsecond resolution for timestamps. To support higher precision streams, we should add nanosecond timestamp types to the upcoming Spec V3. Tracked in discussion #9150. Requires implementation in Python client (#9250) and Java core (#9280).",
           url: "https://github.com/apache/iceberg/issues/9201",
@@ -722,6 +843,7 @@
           title: "Discussions on Timestamp Precision in v3 Specs",
           type: "discussion",
           state: "closed",
+          binding: "core",
           author: "jackye1995",
           body: "Community RFC outlining precise design constraints for nanosecond timestamps. This will be tracked and formalized in issue #9201. Feedback from multiple engine vendors shows strong interest.",
           url: "https://github.com/apache/iceberg/discussions/9150",
@@ -734,6 +856,7 @@
           type: "issue",
           state: "closed",
           stateReason: "bot",
+          binding: "core",
           author: "stale-bot",
           body: "This issue has been automatically marked as stale because it has not had recent activity. It will be closed by the GitHub Actions bot if no further activity occurs. Closed by GitHub Actions bot.",
           url: "https://github.com/apache/iceberg/issues/9140",
@@ -746,6 +869,7 @@
           type: "issue",
           state: "closed",
           stateReason: "not_planned",
+          binding: "core",
           author: "rdblue",
           body: "This feature request proposes introducing index-based joins during client scan planning. After community discussion, we have decided that this introduces too much engine-specific logic into core planning and is not planned for inclusion in the Spec.",
           url: "https://github.com/apache/iceberg/issues/9130",
@@ -758,6 +882,7 @@
           type: "issue",
           state: "closed",
           stateReason: "completed",
+          binding: "java",
           author: "jackye1995",
           body: "Fixes the boundary timestamp checks during snapshot expiration when dealing with empty catalogs. Resolved by PR #9250.",
           url: "https://github.com/apache/iceberg/issues/9120",
