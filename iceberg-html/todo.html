@@ -300,25 +300,39 @@
     { id: "user-notes", category: "Features", title: "Dynamic Notes & Annotations", desc: "Enable inline notes, bookmarks, and rich comment annotations for engineers to capture custom thoughts, review logs, and audit tips per concept.", status: "planned", priority: "low" }
   ];
 
-  document.addEventListener("DOMContentLoaded", () => {
-    // Load state from localStorage or use defaults
-    let tasks = JSON.parse(localStorage.getItem("wiki-todo-state"));
-    
-    // Check if the loaded state contains obsolete dummy keys
-    const hasObsolete = tasks && tasks.some(t => ["client-search", "dark-mode", "spec-sandbox"].includes(t.id));
-    
-    if (!tasks || hasObsolete) {
-      tasks = [...defaultTasks];
-      localStorage.setItem("wiki-todo-state", JSON.stringify(tasks));
-    } else {
-      // Handle schema upgrades or missing default items
-      defaultTasks.forEach(defTask => {
-        if (!tasks.some(t => t.id === defTask.id)) {
-          tasks.push(defTask);
+  document.addEventListener("DOMContentLoaded", async () => {
+    let tasks = [];
+
+    const loadTasksFromDiskOrCache = async () => {
+      // 1. Initial Load Cache Fallback
+      let localTasks = JSON.parse(localStorage.getItem("wiki-todo-state"));
+      
+      const hasObsolete = localTasks && localTasks.some(t => ["client-search", "dark-mode", "spec-sandbox"].includes(t.id));
+      if (!localTasks || hasObsolete) {
+        localTasks = [...defaultTasks];
+        localStorage.setItem("wiki-todo-state", JSON.stringify(localTasks));
+      } else {
+        defaultTasks.forEach(defTask => {
+          if (!localTasks.some(t => t.id === defTask.id)) {
+            localTasks.push(defTask);
+          }
+        });
+        localStorage.setItem("wiki-todo-state", JSON.stringify(localTasks));
+      }
+      
+      tasks = localTasks;
+
+      // 2. Load from disk if synced
+      if (window.wikiDirHandle) {
+        const diskTasks = await window.readWikiFile("wiki-todo-state.json");
+        if (diskTasks) {
+          tasks = diskTasks;
+          localStorage.setItem("wiki-todo-state", JSON.stringify(tasks));
         }
-      });
-      localStorage.setItem("wiki-todo-state", JSON.stringify(tasks));
-    }
+      }
+
+      render();
+    };
 
     const container = document.getElementById("todo-task-container");
     const percentEl = document.getElementById("stats-percent");
@@ -361,9 +375,14 @@
         `;
 
         // Click event to toggle task
-        card.addEventListener("click", () => {
+        card.addEventListener("click", async () => {
           task.status = task.status === "completed" ? "planned" : "completed";
           localStorage.setItem("wiki-todo-state", JSON.stringify(tasks));
+          
+          if (window.wikiDirHandle) {
+            await window.writeWikiFile("wiki-todo-state.json", tasks);
+          }
+          
           updateStats();
           render();
         });
@@ -373,6 +392,14 @@
 
       updateStats();
     }
+    
+    // Listen for directory sync state updates
+    window.addEventListener("wiki-sync-status-changed", async () => {
+      await loadTasksFromDiskOrCache();
+    });
+
+    // Run initial load
+    await loadTasksFromDiskOrCache();
 
     // Update progress bar and percentage counters
     function updateStats() {

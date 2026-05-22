@@ -1,0 +1,82 @@
+[
+  {
+    "id": "mod-split",
+    "category": "Architecture",
+    "title": "Modular Cookbooks Split",
+    "desc": "Decouple monolithic cookbook-recipes.html into highly-focused conceptual chapters with LaTeX mathematical proofs.",
+    "status": "completed",
+    "priority": "high"
+  },
+  {
+    "id": "sidebar-tree",
+    "category": "UX/UI",
+    "title": "Accordion Navigation Sidebar",
+    "desc": "Build clean, title-cased hierarchical directories with solid track-lines, interactive category expansion, and responsive collapse hooks.",
+    "status": "completed",
+    "priority": "high"
+  },
+  {
+    "id": "wide-layout",
+    "category": "UX/UI",
+    "title": "Wide Layout Switching & Fluid Prose",
+    "desc": "Enable full-bleed widescreen toggle to let complex math and proofs expand fully to the page margins, optimizing readouts for large developer monitors.",
+    "status": "completed",
+    "priority": "high"
+  },
+  {
+    "id": "back-top",
+    "category": "UX/UI",
+    "title": "Smart Scroll-to-Top Indicator",
+    "desc": "Add a smooth-scrolling floating capsule that appears when scrolling down, allowing instant jumps back to the page header.",
+    "status": "completed",
+    "priority": "medium"
+  },
+  {
+    "id": "json-sync",
+    "category": "Features",
+    "title": "Local JSON Folder Sync",
+    "desc": "Enable local filesystem synchronization specifically for TableMetadata and Manifest JSON files to dynamically parse, inspect, and validate changes locally using modern File System Access APIs.",
+    "status": "completed",
+    "priority": "high"
+  },
+  {
+    "id": "github-collect",
+    "category": "Integration",
+    "title": "GitHub PR/Issue Collection",
+    "desc": "Integrate with the GitHub API to dynamically collect and track relevant Iceberg repository PRs, issues, and discussions by category.",
+    "status": "planned",
+    "priority": "high"
+  },
+  {
+    "id": "vspec-bindings",
+    "category": "Content",
+    "title": "V-Spec, Binding Differences, & Feature Interactions",
+    "desc": "Establish formal reference specs mapping version differences (Spec v1 vs v2 vs v3), runtime binding capabilities (Java, Python, Rust, C++), and complex feature interactions.",
+    "status": "planned",
+    "priority": "high"
+  },
+  {
+    "id": "project-mgmt",
+    "category": "Management",
+    "title": "Roadmaps, Goals, & Project Management",
+    "desc": "Build direct project management modules, scheduling goals, and release roadmaps to bridge community developer timelines.",
+    "status": "planned",
+    "priority": "medium"
+  },
+  {
+    "id": "gdocs-proposals",
+    "category": "Integration",
+    "title": "Google Docs Change Proposal Integration",
+    "desc": "Integrate and track community-led Google Docs proposals, design drafts, and RFC updates for the Apache Iceberg spec directly in the wiki explorer.",
+    "status": "completed",
+    "priority": "medium"
+  },
+  {
+    "id": "user-notes",
+    "category": "Features",
+    "title": "Dynamic Notes & Annotations",
+    "desc": "Enable inline notes, bookmarks, and rich comment annotations for engineers to capture custom thoughts, review logs, and audit tips per concept.",
+    "status": "planned",
+    "priority": "low"
+  }
+]
