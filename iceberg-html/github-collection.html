@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub PR &amp; Issue Explorer — Iceberg Cookbook</title>
+  <link rel="stylesheet" href="wiki.css">
+</head>
+<body>
+  <div class="wiki-layout">
+    <!-- Shared Sidebar will be rendered programmatically by wiki.js -->
+    <aside class="wiki-sidebar"></aside>
+
+    <main class="wiki-content">
+      <div class="eyebrow">GitHub Integration</div>
+      <h1>PR &amp; Issue Collection Explorer</h1>
+      <p class="sec-desc">
+        Collect, search, and analyze relationships between Apache Iceberg pull requests, issues, and spec discussions. Paste link details or import a sample dataset to map visual connections.
+      </p>
+
+      <div class="github-workspace">
+        <!-- Left Column: Controls & Add Link -->
+        <div class="github-panel">
+          <h3>Add GitHub Resource</h3>
+          <p style="font-size: 12px; color: var(--g500); margin-top: -6px; margin-bottom: 20px;">
+            Paste a public GitHub link or manually register an item.
+          </p>
+
+          <div class="segmented-control">
+            <button id="tab-fetch" class="segmented-btn active" onclick="switchInputTab('fetch')">Fetch Link</button>
+            <button id="tab-manual" class="segmented-btn" onclick="switchInputTab('manual')">Manual Entry</button>
+          </div>
+
+          <!-- Tab A: API Fetch -->
+          <div id="panel-fetch" style="display: block;">
+            <div class="input-group">
+              <label for="gh-url">GitHub Link or Number</label>
+              <input type="text" id="gh-url" class="input-control" placeholder="e.g. apache/iceberg#9280 or pull URL">
+            </div>
+            <button id="btn-fetch-github" class="btn btn-clay" style="width: 100%; justify-content: center; gap: 8px; font-size: 13px; font-weight: 600;" onclick="fetchFromGitHubAPI()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+              </svg>
+              Fetch &amp; Add Resource
+            </button>
+            <div id="fetch-loader" style="display: none; font-size: 11px; color: var(--clay); font-family: var(--mono); margin-top: 8px; text-align: center;">
+              Connecting to public GitHub API...
+            </div>
+            <div id="fetch-error" style="display: none; font-size: 11.5px; color: var(--clay-d); background: var(--clay-l); border-radius: 6px; padding: 8px 12px; border: 1px solid var(--clay); margin-top: 12px; line-height: 1.4;"></div>
+          </div>
+
+          <!-- Tab B: Manual Form -->
+          <div id="panel-manual" style="display: none;">
+            <div class="input-group">
+              <label for="man-number">Resource Number / ID</label>
+              <input type="text" id="man-number" class="input-control" placeholder="e.g. 9280">
+            </div>
+            <div class="input-group">
+              <label for="man-title">Title</label>
+              <input type="text" id="man-title" class="input-control" placeholder="e.g. Support Nanoseconds in V3">
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+              <div class="input-group" style="margin-bottom: 0;">
+                <label for="man-type">Type</label>
+                <select id="man-type" class="filter-select" style="width: 100%; height: 38px; border: 1.5px solid var(--g300); border-radius: 8px;" onchange="toggleManualStateReason()">
+                  <option value="issue">Issue</option>
+                  <option value="pr">PR</option>
+                  <option value="discussion">Discussion</option>
+                </select>
+              </div>
+              <div class="input-group" style="margin-bottom: 0;">
+                <label for="man-state">State</label>
+                <select id="man-state" class="filter-select" style="width: 100%; height: 38px; border: 1.5px solid var(--g300); border-radius: 8px;" onchange="toggleManualStateReason()">
+                  <option value="open">Open</option>
+                  <option value="closed">Closed</option>
+                  <option value="merged">Merged</option>
+                </select>
+              </div>
+            </div>
+            <div class="input-group" id="group-man-state-reason" style="display: none; margin-bottom: 16px;">
+              <label for="man-state-reason">Reason for Closed</label>
+              <select id="man-state-reason" class="filter-select" style="width: 100%; height: 38px; border: 1.5px solid var(--g300); border-radius: 8px;">
+                <option value="completed">Completed</option>
+                <option value="not_planned">Not Planned</option>
+                <option value="bot">Closed by Bot</option>
+              </select>
+            </div>
+
+            <div class="input-group">
+              <label for="man-author">Author</label>
+              <input type="text" id="man-author" class="input-control" placeholder="e.g. rdblue">
+            </div>
+            <div class="input-group">
+              <label for="man-body">Description (use #number references)</label>
+              <textarea id="man-body" class="input-control" style="min-height: 80px; resize: vertical;" placeholder="e.g. Closes #9201. Resolves nanosecond spec support."></textarea>
+            </div>
+            <button class="btn" style="width: 100%; justify-content: center; font-size: 13px; font-weight: 600;" onclick="addManualResource()">
+              Register Custom Item
+            </button>
+          </div>
+
+          <div style="margin-top: 24px; border-top: 1px solid var(--g300); padding-top: 20px; display: flex; flex-direction: column; gap: 8px;">
+            <button class="btn" style="width: 100%; justify-content: center; background: transparent; font-size: 12px; border-color: var(--g500); color: var(--g700);" onclick="loadSampleDataset()">
+              ⚡ Import Sample Dataset
+            </button>
+            <button class="btn" style="width: 100%; justify-content: center; background: transparent; font-size: 12px; border-color: var(--clay); color: var(--clay);" onclick="clearAllData()">
+              Clear Database
+            </button>
+          </div>
+        </div>
+
+        <!-- Right Column: Interactive Relation Board -->
+        <div>
+          <div class="github-board-header">
+            <div class="github-search-bar">
+              <input type="text" id="gh-search" class="input-control" style="background: var(--paper);" placeholder="Search by number or title..." oninput="renderBoard()">
+            </div>
+            <div class="github-filters">
+              <select id="filter-type" class="filter-select" onchange="renderBoard()">
+                <option value="all">All Types</option>
+                <option value="issue">Issues</option>
+                <option value="pr">PRs</option>
+                <option value="discussion">Discussions</option>
+              </select>
+              <select id="filter-state" class="filter-select" onchange="renderBoard()">
+                <option value="all">All States</option>
+                <option value="open">🟢 Open</option>
+                <option value="closed">🔴 Closed</option>
+                <option value="merged">🟣 Merged</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Board Card Grid -->
+          <div id="github-board-grid" class="github-grid">
+            <!-- Rendered programmatically -->
+          </div>
+
+          <!-- Relationships detail section -->
+          <div id="github-detail-panel" class="gh-detail-section" style="display: none;">
+            <!-- Rendered programmatically -->
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="wiki.js"></script>
+  <script>
+    // Local In-Memory Database containing GitHub relation records
+    let ghDatabase = [];
+    let selectedNumber = null;
+
+    // Helper to determine status badge display details
+    function getStatusBadgeDetails(item) {
+      let stateClass = item.state;
+      let stateLabel = item.state.toUpperCase();
+      
+      if (item.state === 'open') {
+        stateLabel = "🟢 " + stateLabel;
+      } else if (item.state === 'merged') {
+        stateLabel = "🟣 " + stateLabel;
+      } else if (item.state === 'closed') {
+        if (item.type === "issue" && item.stateReason) {
+          stateClass = item.stateReason;
+          if (item.stateReason === "completed") {
+            stateLabel = "🟢 COMPLETED";
+          } else if (item.stateReason === "not_planned") {
+            stateLabel = "⚪ NOT PLANNED";
+          } else if (item.stateReason === "bot") {
+            stateLabel = "🤖 CLOSED BY BOT";
+          } else {
+            stateLabel = "🔴 CLOSED";
+          }
+        } else {
+          stateLabel = "🔴 " + stateLabel;
+        }
+      }
+      
+      return { stateClass, stateLabel };
+    }
+
+    // Toggle visibility of the closed state reason selection dynamically
+    function toggleManualStateReason() {
+      const type = document.getElementById("man-type").value;
+      const state = document.getElementById("man-state").value;
+      const reasonGroup = document.getElementById("group-man-state-reason");
+      if (type === "issue" && state === "closed") {
+        reasonGroup.style.display = "block";
+      } else {
+        reasonGroup.style.display = "none";
+      }
+    }
+
+    // Load initial collection on startup
+    async function loadCollection() {
+      // 1. Recover from localStorage
+      const cached = localStorage.getItem("wiki-github-collection");
+      if (cached) {
+        ghDatabase = JSON.parse(cached);
+      }
+
+      // 2. Resolve from physical disk if local folder sync is connected
+      if (window.wikiDirHandle) {
+        const diskData = await window.readWikiFile("wiki-github-collection.json");
+        if (diskData) {
+          ghDatabase = diskData;
+          localStorage.setItem("wiki-github-collection", JSON.stringify(ghDatabase));
+        }
+      }
+
+      rebuildRelationships();
+      renderBoard();
+      
+      // Auto-select first item if database is not empty
+      if (ghDatabase.length > 0) {
+        selectResource(ghDatabase[0].number);
+      }
+    }
+
+    // Auto-save changes locally and to the directory handle
+    async function saveCollection() {
+      localStorage.setItem("wiki-github-collection", JSON.stringify(ghDatabase));
+      if (window.wikiDirHandle) {
+        const success = await window.writeWikiFile("wiki-github-collection.json", ghDatabase);
+        if (!success) {
+          console.error("Workspace disk write failed for wiki-github-collection.json");
+        }
+      }
+    }
+
+    // Tab view switcher in control panel
+    function switchInputTab(tab) {
+      document.getElementById("tab-fetch").classList.toggle("active", tab === "fetch");
+      document.getElementById("tab-manual").classList.toggle("active", tab === "manual");
+      document.getElementById("panel-fetch").style.display = tab === "fetch" ? "block" : "none";
+      document.getElementById("panel-manual").style.display = tab === "manual" ? "block" : "none";
+    }
+
+    // Extract public issue number/slug from link
+    function parseGitHubURL(input) {
+      const trimmed = input.trim();
+      if (!trimmed) return null;
+
+      // Handle simple #number formats
+      if (trimmed.startsWith("#")) {
+        const num = parseInt(trimmed.substring(1));
+        return isNaN(num) ? null : { owner: "apache", repo: "iceberg", number: num };
+      }
+
+      // Handle raw numbers
+      const parsedNum = parseInt(trimmed);
+      if (!isNaN(parsedNum) && String(parsedNum) === trimmed) {
+        return { owner: "apache", repo: "iceberg", number: parsedNum };
+      }
+
+      // Match GitHub Issue/PR urls: https://github.com/{owner}/{repo}/(issues|pull)/{number}
+      const ghRegex = /github\.com\/([a-zA-Z0-9_\-\.]+)\/([a-zA-Z0-9_\-\.]+)\/(pull|issues|discussions)\/(\d+)/i;
+      const match = trimmed.match(ghRegex);
+      if (match) {
+        return {
+          owner: match[1],
+          repo: match[2],
+          number: parseInt(match[4]),
+          isDiscussion: match[3].toLowerCase() === "discussions"
+        };
+      }
+
+      return null;
+    }
+
+    // Direct public GitHub API client-side fetcher
+    async function fetchFromGitHubAPI() {
+      const urlInput = document.getElementById("gh-url");
+      const loader = document.getElementById("fetch-loader");
+      const errorDiv = document.getElementById("fetch-error");
+      
+      errorDiv.style.display = "none";
+      loader.style.display = "block";
+
+      const parsed = parseGitHubURL(urlInput.value);
+      if (!parsed) {
+        loader.style.display = "none";
+        errorDiv.textContent = "❌ Invalid format. Please enter a valid URL (e.g. github.com/apache/iceberg/pull/8542) or a number like #8542.";
+        errorDiv.style.display = "block";
+        return;
+      }
+
+      const { owner, repo, number, isDiscussion } = parsed;
+      const isPR = urlInput.value.includes("/pull/") || (urlInput.value.indexOf("/issues/") === -1 && !isDiscussion && parsed.number > 5000); // Smart fallback heuristics for simple numbers
+
+      try {
+        // Dispatches public GET request directly to GitHub REST API endpoints
+        // Rates: 60 requests/hr unauthenticated.
+        let response;
+        let itemType = isPR ? "pr" : (isDiscussion ? "discussion" : "issue");
+        let itemState = "open";
+
+        if (isDiscussion) {
+          // Public API doesn't fully expose Discussions without GraphQL, fallback to mock details or manual input
+          throw new Error("GitHub Discussions endpoint requires authenticated GraphQL. Please enter details manually using the 'Manual Entry' tab or import the sample dataset to view Discussions.");
+        }
+
+        // Fetch standard issue endpoint
+        response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${number}`);
+        
+        if (response.status === 403) {
+          throw new Error("GitHub API Rate-limit exceeded (60 req/hr). Please use the 'Manual Entry' tab to register items offline, or click 'Import Sample Dataset' to load realistic mock models.");
+        }
+        if (!response.ok) {
+          throw new Error(`GitHub resource not found (#${number} in ${owner}/${repo}).`);
+        }
+
+        const data = await response.json();
+        
+        // Check if actually a PR vs standard Issue
+        if (data.pull_request) {
+          itemType = "pr";
+          // Query pulls endpoint to verify if merged
+          try {
+            const prResp = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${number}`);
+            if (prResp.ok) {
+              const prData = await prResp.json();
+              if (prData.merged) {
+                itemState = "merged";
+              } else {
+                itemState = prData.state;
+              }
+            } else {
+              itemState = data.state;
+            }
+          } catch (e) {
+            itemState = data.state;
+          }
+        } else {
+          itemState = data.state;
+        }
+
+        let stateReason = null;
+        if (itemType === "issue" && itemState === "closed") {
+          let closedByBot = false;
+          if (data.closed_by && (data.closed_by.type === "Bot" || data.closed_by.login.toLowerCase().includes("bot") || data.closed_by.login.toLowerCase().includes("-actions"))) {
+            closedByBot = true;
+          }
+          
+          if (closedByBot) {
+            stateReason = "bot";
+          } else if (data.state_reason === "not_planned") {
+            stateReason = "not_planned";
+          } else {
+            stateReason = "completed";
+          }
+        }
+
+        // Push new record
+        const newResource = {
+          number: String(number),
+          title: data.title,
+          type: itemType,
+          state: itemState,
+          stateReason: stateReason,
+          author: data.user.login,
+          body: data.body || "",
+          url: data.html_url || `https://github.com/${owner}/${repo}/${itemType === 'pr' ? 'pull' : 'issues'}/${number}`,
+          incoming: [],
+          outgoing: []
+        };
+
+        // De-duplicate items
+        ghDatabase = ghDatabase.filter(item => item.number !== newResource.number);
+        ghDatabase.unshift(newResource);
+
+        rebuildRelationships();
+        await saveCollection();
+        renderBoard();
+        selectResource(newResource.number);
+
+        urlInput.value = "";
+        loader.style.display = "none";
+      } catch (err) {
+        loader.style.display = "none";
+        errorDiv.textContent = `⚠️ API Fetch failed: ${err.message}`;
+        errorDiv.style.display = "block";
+      }
+    }
+
+    // Manual Entry Form registration
+    async function addManualResource() {
+      const numInput = document.getElementById("man-number");
+      const titleInput = document.getElementById("man-title");
+      const typeSelect = document.getElementById("man-type");
+      const stateSelect = document.getElementById("man-state");
+      const authorInput = document.getElementById("man-author");
+      const bodyInput = document.getElementById("man-body");
+
+      const numberStr = numInput.value.replace("#", "").trim();
+      const title = titleInput.value.trim();
+
+      if (!numberStr || !title) {
+        alert("Please enter both an Issue/PR Number and a Title.");
+        return;
+      }
+
+      let stateReason = null;
+      if (typeSelect.value === "issue" && stateSelect.value === "closed") {
+        stateReason = document.getElementById("man-state-reason").value;
+      }
+
+      const newItem = {
+        number: numberStr,
+        title: title,
+        type: typeSelect.value,
+        state: stateSelect.value,
+        stateReason: stateReason,
+        author: authorInput.value.trim() || "anonymous",
+        body: bodyInput.value || "",
+        url: `https://github.com/apache/iceberg/${typeSelect.value === 'pr' ? 'pull' : (typeSelect.value === 'discussion' ? 'discussions' : 'issues')}/${numberStr}`,
+        incoming: [],
+        outgoing: []
+      };
+
+      // De-duplicate
+      ghDatabase = ghDatabase.filter(item => item.number !== newItem.number);
+      ghDatabase.unshift(newItem);
+
+      rebuildRelationships();
+      await saveCollection();
+      renderBoard();
+      selectResource(newItem.number);
+
+      // Clear input fields
+      numInput.value = "";
+      titleInput.value = "";
+      authorInput.value = "";
+      bodyInput.value = "";
+      
+      // Reset state reason selection
+      document.getElementById("man-state-reason").value = "completed";
+      document.getElementById("group-man-state-reason").style.display = "none";
+    }
+
+    // Helper regex engine to compile Outgoing & Incoming bidirectional vectors
+    function rebuildRelationships() {
+      // Clear previous bounds
+      ghDatabase.forEach(item => {
+        item.incoming = [];
+        item.outgoing = [];
+      });
+
+      // Parse and resolve reference webs
+      const numbersInDB = new Set(ghDatabase.map(item => item.number));
+
+      ghDatabase.forEach(item => {
+        const bodyText = item.body || "";
+        // Match standard #number patterns
+        const refRegex = /#(\d+)/g;
+        let match;
+        const matchedNumbers = new Set();
+
+        while ((match = refRegex.exec(bodyText)) !== null) {
+          const refNum = match[1];
+          if (refNum !== item.number && numbersInDB.has(refNum)) {
+            matchedNumbers.add(refNum);
+          }
+        }
+
+        // Add to outgoing list and configure inbound back-link
+        matchedNumbers.forEach(refNum => {
+          item.outgoing.push(refNum);
+          
+          const target = ghDatabase.find(t => t.number === refNum);
+          if (target && !target.incoming.includes(item.number)) {
+            target.incoming.push(item.number);
+          }
+        });
+      });
+    }
+
+    // Interactive Node selector
+    function selectResource(number) {
+      selectedNumber = String(number);
+      
+      // Update selected class in DOM grid
+      const cards = document.querySelectorAll(".gh-card");
+      cards.forEach(card => {
+        card.classList.toggle("selected", card.getAttribute("data-number") === selectedNumber);
+      });
+
+      const selectedItem = ghDatabase.find(item => item.number === selectedNumber);
+      renderDetailPanel(selectedItem);
+    }
+
+    // Detail Panel and Connection Diagram compiler
+    function renderDetailPanel(item) {
+      const panel = document.getElementById("github-detail-panel");
+      if (!item) {
+        panel.style.display = "none";
+        return;
+      }
+
+      panel.style.display = "flex";
+
+      const { stateClass, stateLabel } = getStatusBadgeDetails(item);
+
+      // Map relation rows
+      const renderRelationPills = (numbers) => {
+        if (!numbers || numbers.length === 0) {
+          return `<span style="font-size: 12px; color: var(--g500); font-style: italic;">No references detected</span>`;
+        }
+        return numbers.map(num => {
+          const target = ghDatabase.find(t => t.number === num);
+          const typeLabel = target ? target.type.toUpperCase() : "ITEM";
+          const titleText = target ? target.title : `Resource #${num}`;
+          return `
+            <div class="ref-pill" title="${titleText}" onclick="selectResource('${num}')">
+              <span class="badge-type ${target ? target.type : 'issue'}" style="font-size: 9px; padding: 1px 4px;">${typeLabel}</span>
+              <strong>#${num}</strong>
+              <span style="max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px;">
+                ${titleText}
+              </span>
+            </div>
+          `;
+        }).join("");
+      };
+
+      // Compile Markdown-style body references to highlight links
+      let processedBody = (item.body || "No description provided.")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\r\n|\r|\n/g, "<br>");
+
+      // Wrap #numbers with interactive highlights
+      const numbersInDB = new Set(ghDatabase.map(t => t.number));
+      processedBody = processedBody.replace(/#(\d+)/g, (match, num) => {
+        if (numbersInDB.has(num)) {
+          return `<span class="ref-pill active-node" style="padding: 1px 5px; font-size: 11px; margin: 0 2px;" onclick="selectResource('${num}')">${match}</span>`;
+        }
+        return `<span style="color: var(--clay); font-weight: 600;">${match}</span>`;
+      });
+
+      panel.innerHTML = `
+        <div>
+          <div class="eyebrow" style="margin-bottom: 4px;">Selected Resource In-Depth Graph</div>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+            <h2 style="margin: 0; font-size: 20px;">
+              <span class="badge-type ${item.type}">${item.type}</span> 
+              <span style="color: var(--g500); font-family: var(--mono); font-weight: bold;">#${item.number}</span> 
+              ${item.title}
+            </h2>
+            <div style="display: flex; gap: 8px;">
+              <span class="badge-status ${stateClass}">${stateLabel}</span>
+              <a href="${item.url}" target="_blank" class="btn" style="padding: 4px 10px; font-size: 11px; background: transparent; border-color: var(--slate); color: var(--slate); text-decoration: none;">
+                View on GitHub ↗
+              </a>
+            </div>
+          </div>
+          <div style="font-size: 12px; color: var(--g500); margin-top: 6px; font-family: var(--mono);">
+            Registered by: <strong>@${item.author}</strong>
+          </div>
+        </div>
+
+        <!-- Connection Network Visualizer -->
+        <div>
+          <div class="nav-category" style="border-bottom: none; margin-bottom: 8px; font-size: 11px; font-weight: bold; letter-spacing: 0.05em;">
+            Visual Dependency Web Map
+          </div>
+          <div class="relation-graph">
+            <!-- Lane 1: Outbound References -->
+            <div class="relation-lane">
+              <span class="relation-lane-label">Resolves / Outgoing</span>
+              <span class="relation-arrow">←</span>
+              <div class="relation-pills">${renderRelationPills(item.outgoing)}</div>
+            </div>
+            
+            <!-- Lane 2: Active Node -->
+            <div class="relation-lane" style="background: rgba(250, 249, 245, 0.7); border: 1.5px solid var(--slate); border-radius: 8px; padding: 10px 14px; margin: 4px 0;">
+              <span class="relation-lane-label" style="color: var(--slate); font-weight: 800;">ACTIVE NODE</span>
+              <span class="relation-arrow">📍</span>
+              <div class="relation-pills">
+                <div class="ref-pill active-node" style="border-color: var(--clay); box-shadow: 0 2px 8px rgba(217, 119, 87, 0.15);">
+                  <span class="badge-type ${item.type}">${item.type}</span>
+                  <strong>#${item.number}</strong>
+                  <span style="font-weight: 600;">${item.title}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Lane 3: Inbound References -->
+            <div class="relation-lane">
+              <span class="relation-lane-label">Referenced By / Inbound</span>
+              <span class="relation-arrow">➔</span>
+              <div class="relation-pills">${renderRelationPills(item.incoming)}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Description body -->
+        <div>
+          <div class="nav-category" style="border-bottom: none; margin-bottom: 8px; font-size: 11px; font-weight: bold; letter-spacing: 0.05em;">
+            Resource Description Body
+          </div>
+          <div style="background: var(--ivory); border: 1px solid var(--g300); border-radius: 8px; padding: 16px 20px; font-size: 13.5px; line-height: 1.55; color: var(--g700); font-family: var(--sans);">
+            ${processedBody}
+          </div>
+        </div>
+      `;
+    }
+
+    // Grid board renderer
+    function renderBoard() {
+      const grid = document.getElementById("github-board-grid");
+      const searchVal = document.getElementById("gh-search").value.toLowerCase().trim();
+      const typeFilter = document.getElementById("filter-type").value;
+      const stateFilter = document.getElementById("filter-state").value;
+
+      let filtered = ghDatabase;
+
+      // Filter queries
+      if (searchVal) {
+        filtered = filtered.filter(item => 
+          item.number.includes(searchVal) || 
+          item.title.toLowerCase().includes(searchVal) ||
+          item.body.toLowerCase().includes(searchVal)
+        );
+      }
+      if (typeFilter !== "all") {
+        filtered = filtered.filter(item => item.type === typeFilter);
+      }
+      if (stateFilter !== "all") {
+        filtered = filtered.filter(item => item.state === stateFilter);
+      }
+
+      if (filtered.length === 0) {
+        grid.innerHTML = `
+          <div style="grid-column: 1/-1; padding: 48px; border: 1.5px dashed var(--g300); border-radius: 12px; text-align: center;">
+            <p style="font-size: 14px; color: var(--g500); font-weight: 500; margin: 0;">
+              No GitHub resources match your filter query.
+            </p>
+          </div>
+        `;
+        document.getElementById("github-detail-panel").style.display = "none";
+        return;
+      }
+
+      grid.innerHTML = filtered.map(item => {
+        const { stateClass, stateLabel } = getStatusBadgeDetails(item);
+
+        const isSelected = String(item.number) === selectedNumber;
+
+        return `
+          <div class="gh-card ${isSelected ? 'selected' : ''}" data-number="${item.number}" onclick="selectResource('${item.number}')">
+            <div class="gh-card-header">
+              <div class="gh-card-meta">
+                <span class="badge-type ${item.type}">${item.type}</span>
+                <span class="gh-card-number">#${item.number}</span>
+              </div>
+              <span class="badge-status ${stateClass}" style="font-size: 9px; padding: 1px 6px;">${stateLabel}</span>
+            </div>
+            <h4 class="gh-card-title">${item.title}</h4>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: auto; font-size: 11px; color: var(--g500); font-family: var(--mono);">
+              <span>@${item.author}</span>
+              <span style="font-weight: bold; color: var(--clay); display: flex; align-items: center; gap: 4px;">
+                ${item.outgoing.length + item.incoming.length > 0 ? `🔗 ${item.outgoing.length + item.incoming.length} refs` : ''}
+              </span>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      // Confirm detailed panel is active for the selected node
+      const activeObj = filtered.find(item => item.number === selectedNumber);
+      if (activeObj) {
+        renderDetailPanel(activeObj);
+      } else if (filtered.length > 0) {
+        // Fallback to active index 0 if query invalidated current selection
+        selectResource(filtered[0].number);
+      } else {
+        document.getElementById("github-detail-panel").style.display = "none";
+      }
+    }
+
+    // Sample database loader
+    async function loadSampleDataset() {
+      const sample = [
+        {
+          number: "9280",
+          title: "Core: Add nanosecond timestamp support to Spec v3",
+          type: "pr",
+          state: "open",
+          author: "aokolnychyi",
+          body: "Implements the core spec requirements described in #9201. Adds nanosecond resolution storage mappings and test integrations. Closes #9201. Depends on final consensus in RFC discussion #9150.",
+          url: "https://github.com/apache/iceberg/pull/9280",
+          incoming: [],
+          outgoing: []
+        },
+        {
+          number: "9250",
+          title: "Python: Implement V3 nanosecond timestamp reads",
+          type: "pr",
+          state: "merged",
+          author: "fokko",
+          body: "Brings Python bindings to parity with core Java changes. Implements V3 nanosecond resolution schema parser and projections. Addresses #9201. Closes #9201. Closes #9120. Tested against core local outputs.",
+          url: "https://github.com/apache/iceberg/pull/9250",
+          incoming: [],
+          outgoing: []
+        },
+        {
+          number: "9201",
+          title: "Support Nanosecond Timestamp Resolution in Spec v3",
+          type: "issue",
+          state: "open",
+          author: "rdblue",
+          body: "Currently, the Iceberg V1 and V2 specs only permit microsecond resolution for timestamps. To support higher precision streams, we should add nanosecond timestamp types to the upcoming Spec V3. Tracked in discussion #9150. Requires implementation in Python client (#9250) and Java core (#9280).",
+          url: "https://github.com/apache/iceberg/issues/9201",
+          incoming: [],
+          outgoing: []
+        },
+        {
+          number: "9150",
+          title: "Discussions on Timestamp Precision in v3 Specs",
+          type: "discussion",
+          state: "closed",
+          author: "jackye1995",
+          body: "Community RFC outlining precise design constraints for nanosecond timestamps. This will be tracked and formalized in issue #9201. Feedback from multiple engine vendors shows strong interest.",
+          url: "https://github.com/apache/iceberg/discussions/9150",
+          incoming: [],
+          outgoing: []
+        },
+        {
+          number: "9140",
+          title: "Spec: Add support for deprecated BSON files",
+          type: "issue",
+          state: "closed",
+          stateReason: "bot",
+          author: "stale-bot",
+          body: "This issue has been automatically marked as stale because it has not had recent activity. It will be closed by the GitHub Actions bot if no further activity occurs. Closed by GitHub Actions bot.",
+          url: "https://github.com/apache/iceberg/issues/9140",
+          incoming: [],
+          outgoing: []
+        },
+        {
+          number: "9130",
+          title: "Support index-based joins in client planning",
+          type: "issue",
+          state: "closed",
+          stateReason: "not_planned",
+          author: "rdblue",
+          body: "This feature request proposes introducing index-based joins during client scan planning. After community discussion, we have decided that this introduces too much engine-specific logic into core planning and is not planned for inclusion in the Spec.",
+          url: "https://github.com/apache/iceberg/issues/9130",
+          incoming: [],
+          outgoing: []
+        },
+        {
+          number: "9120",
+          title: "Core: Fix snapshot expiration boundary checks",
+          type: "issue",
+          state: "closed",
+          stateReason: "completed",
+          author: "jackye1995",
+          body: "Fixes the boundary timestamp checks during snapshot expiration when dealing with empty catalogs. Resolved by PR #9250.",
+          url: "https://github.com/apache/iceberg/issues/9120",
+          incoming: [],
+          outgoing: []
+        }
+      ];
+
+      ghDatabase = sample;
+      rebuildRelationships();
+      await saveCollection();
+      renderBoard();
+      selectResource("9280");
+    }
+
+    // Database clear helper
+    async function clearAllData() {
+      if (confirm("Are you sure you want to clear the entire GitHub collection? This deletes both local cache and disk sync records.")) {
+        ghDatabase = [];
+        selectedNumber = null;
+        await saveCollection();
+        renderBoard();
+      }
+    }
+
+    // Trigger local filesystem sync listener
+    window.addEventListener("wiki-sync-status-changed", async () => {
+      await loadCollection();
+    });
+
+    // Run loader on boot
+    document.addEventListener("DOMContentLoaded", async () => {
+      await loadCollection();
+    });
+  </script>
+</body>
+</html>

@@ -1041,3 +1041,274 @@ table.parity-table tr:last-child td {
   white-space: pre;
   line-height: 1.55;
 }
+
+/* ── GitHub PR & Issue Collection Explorer Styles ────────────────── */
+.github-workspace {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 32px;
+  align-items: start;
+  margin-top: 24px;
+}
+@media (max-width: 960px) {
+  .github-workspace {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+}
+
+/* Control Panel */
+.github-panel {
+  background: var(--paper);
+  border: 1.5px solid var(--g300);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 4px 12px rgba(20,20,19,0.03);
+}
+
+.segmented-control {
+  display: flex;
+  background: var(--g100);
+  border: 1px solid var(--g300);
+  padding: 3px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+.segmented-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--g700);
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+.segmented-btn.active {
+  background: var(--paper);
+  color: var(--slate);
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(20,20,19,0.06);
+}
+
+.input-group {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.input-group label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--g500);
+  letter-spacing: 0.05em;
+}
+.input-control {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid var(--g300);
+  border-radius: 8px;
+  font-family: var(--sans);
+  font-size: 13px;
+  outline: none;
+  background: var(--ivory);
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.input-control:focus {
+  border-color: var(--clay);
+  background: var(--paper);
+}
+
+/* Board Listings & Cards */
+.github-board-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.github-search-bar {
+  display: flex;
+  gap: 8px;
+  flex-grow: 1;
+  max-width: 400px;
+}
+.github-filters {
+  display: flex;
+  gap: 8px;
+}
+.filter-select {
+  padding: 6px 10px;
+  border: 1.5px solid var(--g300);
+  border-radius: 6px;
+  font-family: var(--sans);
+  font-size: 12px;
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.github-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.gh-card {
+  background: var(--paper);
+  border: 1.5px solid var(--g300);
+  border-radius: 12px;
+  padding: 20px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(20,20,19,0.02);
+  position: relative;
+}
+.gh-card:hover {
+  border-color: var(--slate);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(20,20,19,0.06);
+}
+.gh-card.selected {
+  border-color: var(--clay);
+  box-shadow: 0 0 0 1px var(--clay), 0 8px 24px rgba(217, 119, 87, 0.1);
+  transform: translateY(-2px);
+}
+
+.gh-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.gh-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gh-card-number {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--g500);
+}
+.gh-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--slate);
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Custom Badges */
+.badge-type, .badge-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.badge-type.issue { background: var(--g100); color: var(--g700); }
+.badge-type.pr { background: #EAF2FC; color: #2B6CB0; }
+.badge-type.discussion { background: var(--oat-l); color: var(--clay); }
+
+.badge-status.open { background: var(--olive-l); color: var(--olive); border: 1px solid var(--olive); }
+.badge-status.closed { background: #FAF3F0; color: var(--clay); border: 1px solid var(--clay); }
+.badge-status.merged { background: #F3ECF7; color: #8F55C9; border: 1px solid #C0A1DB; }
+.badge-status.completed { background: var(--olive-l); color: var(--olive); border: 1px solid var(--olive); }
+.badge-status.not_planned { background: var(--g100); color: var(--g500); border: 1px solid var(--g300); }
+.badge-status.bot { background: #E2F0FE; color: #1A56DB; border: 1px solid #A4CAFE; }
+
+
+/* References / Connection Web Panel */
+.gh-detail-section {
+  grid-column: span 2;
+  background: var(--paper);
+  border: 1.5px solid var(--slate);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 12px 32px rgba(20,20,19,0.04);
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+@media (max-width: 960px) {
+  .gh-detail-section {
+    grid-column: span 1;
+  }
+}
+
+.relation-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  background: var(--oat-l);
+  border: 1px solid var(--g300);
+  border-radius: 8px;
+}
+
+.relation-lane {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.relation-lane-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--g500);
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.relation-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ref-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--paper);
+  border: 1px solid var(--g300);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--slate);
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+.ref-pill:hover {
+  border-color: var(--clay);
+  color: var(--clay);
+  transform: translateY(-1px);
+}
+.ref-pill.active-node {
+  border-color: var(--slate);
+  background: var(--g200);
+  font-weight: 600;
+}
+
+.relation-arrow {
+  color: var(--g500);
+  font-weight: bold;
+}
+

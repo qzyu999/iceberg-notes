@@ -1,0 +1,81 @@
+[
+  {
+    "number": "516",
+    "title": "Support Snapshot Expiration Operation",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "completed",
+    "author": "sungwy",
+    "body": "### Feature Request / Improvement\r\n\r\nSupport Maintenance operations on PyIceberg: https://iceberg.apache.org/docs/1.4.0/maintenance\r\n\r\nAll operations except for data file compaction are metadata-only or file system operations, so supporting them on PyIceberg may be a small lift",
+    "url": "https://github.com/apache/iceberg-python/issues/516",
+    "incoming": [
+      "1880"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "1880",
+    "title": "Added ExpireSnapshots Feature",
+    "type": "pr",
+    "state": "merged",
+    "author": "ForeverAngry",
+    "body": "\r\n\r\n\r\n\r\n## Summary\r\n\r\nThis PR Closes issue #516 by implementing support for the `ExpireSnapshot` table metadata action.\r\n\r\n## Rationale\r\n\r\nThe `ExpireSnapshot` action is a core part of Iceberg’s table maintenance APIs. Adding support for this action in PyIceberg helps ensure feature parity with other language implementations (e.g., Java) and supports users who want to programmatically manage snapshot retention using PyIceberg’s public API.\r\n\r\n## Testing\r\n\r\n- Unit tests have been added to cover the initial expected usage paths.\r\n- Additional feedback on edge cases, missing test scenarios or corrections to the setup test logic is greatly welcome during the review process.\r\n\r\n## User-facing changes\r\n\r\n- This change introduces a new public API: `ExpireSnapshot`.\r\n- No breaking changes or modifications to existing APIs were made.\r\n\r\n---",
+    "url": "https://github.com/apache/iceberg-python/pull/1880",
+    "incoming": [],
+    "outgoing": [
+      "516"
+    ]
+  },
+  {
+    "number": "3124",
+    "title": "feat: Add table.maintenance.compact() for full-table data file compaction",
+    "type": "pr",
+    "state": "open",
+    "author": "qzyu999",
+    "body": "Closes #1092\r\n\r\n# Rationale for this change\r\nThis introduces a simplified, whole-table compaction strategy via the MaintenanceTable API (`table.maintenance.compact()`).\r\n\r\nKey implementation details:\r\n- Reads the entire table state into memory via `.to_arrow()`.\r\n  - Note: This initial implementation uses an in-memory Arrow-based rewrite strategy. Future iterations can extend this to support streaming or distributed rewrites for larger-than-memory datasets.\r\n- Uses `table.overwrite()` to rewrite data, leveraging PyIceberg's target file bin-packing (`write.target-file-size-bytes`) natively.\r\n- Ensures atomicity by executing within a table transaction.\r\n- Explicitly sets `snapshot-type: replace` and `replace-operation: compaction` to ensure correct metadata history for downstream engines.\r\n- Includes a guard to safely ignore compaction requests on empty tables.\r\n\r\n## Are these changes tested?\r\nIncludes full Pytest coverage in `tests/table/test_maintenance.py`.\r\n\r\n## Are there any user-facing changes?\r\nYes. This PR adds a new compact() method to the TableMaintenance API, allowing users to perform file compaction on existing Iceberg tables.\r\n\r\nExample usage:\r\n```Python\r\ntable = catalog.load_table(\"default.my_table\")\r\n# Merges small files into larger ones based on table properties\r\ntable.maintenance.compact()\r\n```\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n\r\nEdit: It looks like I'm not able to add the changelog label, hopefully someone with permissions can do so.\r\n",
+    "url": "https://github.com/apache/iceberg-python/pull/3124",
+    "incoming": [],
+    "outgoing": [
+      "1092"
+    ]
+  },
+  {
+    "number": "1092",
+    "title": "Support data files compaction",
+    "type": "issue",
+    "state": "open",
+    "author": "sungwy",
+    "body": "Introduce an API to compact data files. The first version of the API will do the following:\r\n- take a predicate expression as input parameter to find data files matching the filter that will be re-written\r\n- group data files by partitions and rewrite them using the same bin-packing constraints of the writer\r\n",
+    "url": "https://github.com/apache/iceberg-python/issues/1092",
+    "incoming": [
+      "3124"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "819",
+    "title": "Support IsolationLevels and Concurrency Safety Validation Checks",
+    "type": "issue",
+    "state": "open",
+    "author": "sungwy",
+    "body": "### Feature Request / Improvement\n\nSupport enforcing Isolation Levels from specified snapshot ID \n\nhttps://iceberg.apache.org/docs/latest/spark-configuration/#write-options\n\nThere's been a lot of continued interest in using multiple PyIceberg applications concurrently and having proper support for optimistic concurrency.\n\nI think the best place to start is through the implementation of the individual validation functions\n\n\nOnce this is complete, we'll be able to introduce the Isolation Levels and correctly implement the validation logic in the _OverwriteFiles snapshot producer, similarly to the [Java implementation](https://github.com/apache/iceberg/blob/9fc49e187069c7ec2493ac0abf20f73175b3df89/core/src/main/java/org/apache/iceberg/BaseOverwriteFiles.java#L121-L164)",
+    "url": "https://github.com/apache/iceberg-python/issues/819",
+    "incoming": [
+      "3320"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "3320",
+    "title": "Add commit retry and concurrency validation for writes",
+    "type": "pr",
+    "state": "open",
+    "author": "lawofcycles",
+    "body": "Closes #3319\r\nCloses #819\r\nCloses #269\r\n\r\n# Rationale for this change\r\n\r\nPyIceberg currently fails immediately with `CommitFailedException` when a concurrent transaction commits first, regardless of whether the writes actually conflict. Java Iceberg handles this transparently through its retry loop in `SnapshotProducer.commit()`.\r\n\r\nThis PR adds automatic commit retry with exponential backoff and data conflict validation to PyIceberg, matching Java Iceberg's behavior. On `CommitFailedException`, the retry loop refreshes table metadata, re-runs validation, and regenerates manifests. If validation detects a real data conflict, the operation aborts with `ValidationException` instead of retrying.\r\n\r\nThe retry loop is placed in `Transaction.commit_transaction()` rather than in individual snapshot producers. This is necessary because `Transaction.delete()` uses two producers (`_DeleteFiles` + `_OverwriteFiles`) that must be committed atomically. Retrying at the producer level would break this atomicity.\r\n\r\nValidation behavior follows Java's `BaseOverwriteFiles.validate()`, using the existing validation functions from `validate.py` that were contributed through #1935, #1938, #2050, and #3049.\r\n\r\n## Are these changes tested?\r\nYes. Unit tests and integration tests covering retry success, `ValidationException` abort, retry exhaustion, isolation levels, partition-level conflict detection, manifest cleanup, and producer state reset.\r\n\r\n## Are there any user-facing changes?\r\nYes. Previously, all concurrent write conflicts resulted in `CommitFailedException`.\r\n\r\n Now:\r\n- Compatible concurrent writes (e.g. concurrent appends) are retried automatically and succeed transparently\r\n- Incompatible concurrent writes (e.g. concurrent deletes on the same data) raise `ValidationException` instead of `CommitFailedException`\r\n\r\nThe following new table properties are supported.\r\n- `commit.retry.num-retries` (default: 4)\r\n- `commit.retry.min-wait-ms` (default: 100)\r\n- `commit.retry.max-wait-ms` (default: 60000)\r\n- `write.delete.isolation-level` (default: serializable)\r\n- `write.update.isolation-level` (default: serializable)",
+    "url": "https://github.com/apache/iceberg-python/pull/3320",
+    "incoming": [],
+    "outgoing": [
+      "819"
+    ]
+  }
+]
