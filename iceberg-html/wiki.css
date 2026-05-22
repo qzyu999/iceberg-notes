@@ -740,11 +740,15 @@ table.parity-table tr:last-child td {
   left: 20px;
   top: 20px;
   z-index: 999;
-  background: var(--paper);
-  border: 1.5px solid var(--slate);
+  background: rgba(250, 249, 245, 0.85);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1.5px solid var(--g300);
   color: var(--slate);
   padding: 10px;
-  border-radius: 8px;
+  border-radius: 99px;
+  width: 38px;
+  height: 38px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -753,18 +757,185 @@ table.parity-table tr:last-child td {
   opacity: 0;
   transform: translateX(-20px);
   pointer-events: none;
-  transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 150ms ease,
+              border-color 150ms ease,
+              box-shadow 150ms ease;
 }
 .sidebar-expand-btn.visible {
   opacity: 1;
   transform: translateX(0);
   pointer-events: auto;
 }
-.sidebar-expand-btn:hover {
-  background: var(--slate);
-  color: var(--paper);
-  transform: translateY(-1px);
+.sidebar-expand-btn.visible:hover {
+  background: var(--paper);
+  border-color: var(--slate);
+  transform: translateX(0) translateY(-2px);
   box-shadow: 0 6px 16px rgba(20,20,19,0.1);
+}
+.sidebar-expand-btn:active {
+  transform: translateX(0) translateY(-1px);
+}
+
+/* Floating Local Workspace Sync Pill (Visible when sidebar is collapsed) */
+.floating-sync-pill {
+  position: fixed;
+  left: 20px;
+  top: 72px; /* Directly under the sidebar expand button */
+  z-index: 999;
+  background: rgba(250, 249, 245, 0.85);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1.5px solid var(--g300);
+  border-radius: 99px;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(20,20,19,0.06);
+  opacity: 0;
+  transform: translateX(-20px);
+  pointer-events: none;
+  transition: transform 250ms cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 250ms cubic-bezier(0.4, 0, 0.2, 1),
+              width 250ms cubic-bezier(0.4, 0, 0.2, 1),
+              padding 250ms cubic-bezier(0.4, 0, 0.2, 1),
+              background-color 150ms ease,
+              border-color 150ms ease,
+              box-shadow 150ms ease;
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+}
+.floating-sync-pill.visible {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+.floating-sync-pill.visible:hover {
+  width: auto;
+  padding: 0 14px;
+  background: var(--paper);
+  border-color: var(--slate);
+  transform: translateX(0) translateY(-2px);
+  box-shadow: 0 6px 16px rgba(20,20,19,0.1);
+}
+.floating-sync-pill:active {
+  transform: translateX(0) translateY(-1px);
+}
+
+.floating-sync-icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.floating-sync-icon {
+  color: var(--slate);
+  transition: color 150ms ease, transform 150ms ease;
+}
+
+/* Color folder SVG icon based on active connection state */
+.floating-sync-pill.synced .floating-sync-icon {
+  color: var(--olive);
+}
+.floating-sync-pill.pending .floating-sync-icon {
+  color: var(--clay);
+  animation: sync-icon-pulse 1.8s infinite ease-in-out;
+}
+.floating-sync-pill.disconnected .floating-sync-icon {
+  color: var(--g500);
+}
+
+.floating-sync-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(250, 249, 245, 0.85);
+  transition: all 150ms ease;
+}
+.floating-sync-pill.visible:hover .floating-sync-badge {
+  border-color: var(--paper);
+}
+.floating-sync-pill.synced.visible:hover .floating-sync-badge {
+  border-color: var(--olive-l);
+}
+.floating-sync-pill.pending.visible:hover .floating-sync-badge {
+  border-color: var(--clay-l);
+}
+.floating-sync-pill.disconnected.visible:hover .floating-sync-badge {
+  border-color: var(--g100);
+}
+
+.floating-sync-badge.synced {
+  background: var(--olive);
+  box-shadow: 0 0 6px var(--olive);
+}
+.floating-sync-badge.pending {
+  background: var(--clay);
+  box-shadow: 0 0 6px var(--clay);
+  animation: sync-pulse-glow 1.8s infinite ease-in-out;
+}
+.floating-sync-badge.disconnected {
+  background: var(--g500);
+  box-shadow: none;
+}
+
+/* State-specific Hover Borders and Backgrounds */
+.floating-sync-pill.synced.visible:hover {
+  border-color: var(--olive);
+  background: var(--olive-l);
+}
+.floating-sync-pill.pending.visible:hover {
+  border-color: var(--clay);
+  background: var(--clay-l);
+}
+.floating-sync-pill.disconnected.visible:hover {
+  border-color: var(--g500);
+  background: var(--g100);
+}
+
+@keyframes sync-icon-pulse {
+  0% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.9; }
+}
+
+/* Text hidden by default, slides out on hover */
+.floating-sync-text {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--slate);
+  white-space: nowrap;
+  max-width: 0;
+  opacity: 0;
+  margin-left: 0;
+  transition: max-width 250ms cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              margin-left 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.floating-sync-pill.visible:hover .floating-sync-text {
+  max-width: 120px;
+  opacity: 1;
+  margin-left: 8px;
+}
+
+@keyframes sync-pulse-glow {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  50% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 8px var(--clay); }
+  100% { transform: scale(0.9); opacity: 0.7; }
 }
 
 .back-to-top-btn {

@@ -180,6 +180,41 @@ async function syncNotesOnConnection() {
   }
 }
 
+// ── Floating Sync Pill State Updater ──
+function updateFloatingSyncPill() {
+  const pill = document.getElementById("floating-sync-indicator");
+  if (!pill) return;
+
+  let dotClass = "disconnected";
+  let statusText = "Sync Off";
+  let tooltipText = "Workspace sync disabled. Click to setup local directory.";
+  
+  if (window.wikiDirHandle) {
+    dotClass = "synced";
+    statusText = window.wikiDirHandle.name;
+    tooltipText = `🟢 Synced with: ${window.wikiDirHandle.name}. Click to view workspace options.`;
+  } else if (window.wikiPendingHandle) {
+    dotClass = "pending";
+    statusText = "Re-auth";
+    tooltipText = `🟡 Action required: Click to grant permission to ${window.wikiPendingHandle.name}.`;
+  }
+
+  // Remove existing state classes to prevent class accumulation
+  pill.classList.remove("synced", "pending", "disconnected");
+  pill.classList.add(dotClass);
+
+  pill.innerHTML = `
+    <div class="floating-sync-icon-wrapper">
+      <svg class="floating-sync-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+      </svg>
+      <span class="floating-sync-badge ${dotClass}"></span>
+    </div>
+    <span class="floating-sync-text">${statusText}</span>
+  `;
+  pill.title = tooltipText;
+}
+
 // ── DOM Main Content Initialization ──
 document.addEventListener("DOMContentLoaded", async () => {
   const sidebar = document.querySelector("aside.wiki-sidebar");
@@ -215,6 +250,68 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.body.appendChild(topBtn);
   }
 
+  if (!document.getElementById("floating-sync-indicator")) {
+    const syncPill = document.createElement("div");
+    syncPill.id = "floating-sync-indicator";
+    syncPill.className = `floating-sync-pill ${isSidebarCollapsed ? 'visible' : ''}`;
+    document.body.appendChild(syncPill);
+    
+    // Add click listener for quick actions on the floating pill
+    syncPill.addEventListener("click", async () => {
+      if (window.wikiPendingHandle) {
+        // QUICK RE-AUTHORIZE
+        try {
+          const mode = 'readwrite';
+          const permission = await window.wikiPendingHandle.requestPermission({ mode });
+          if (permission === 'granted') {
+            window.wikiDirHandle = window.wikiPendingHandle;
+            window.wikiPendingHandle = null;
+            await saveHandle(window.wikiDirHandle);
+            await migrateRootFilesToSubfolder();
+            await syncTasksOnConnection();
+            await syncNotesOnConnection();
+            renderSidebar();
+            updateFloatingSyncPill();
+            window.dispatchEvent(new CustomEvent("wiki-sync-status-changed"));
+          }
+        } catch (e) {
+          console.error("Re-authorization failed:", e);
+        }
+      } else if (!window.wikiDirHandle) {
+        // QUICK CONNECT
+        try {
+          const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+          window.wikiDirHandle = handle;
+          window.wikiPendingHandle = null;
+          await saveHandle(handle);
+          await migrateRootFilesToSubfolder();
+          await syncTasksOnConnection();
+          await syncNotesOnConnection();
+          renderSidebar();
+          updateFloatingSyncPill();
+          window.dispatchEvent(new CustomEvent("wiki-sync-status-changed"));
+        } catch (e) {
+          console.error("Folder picker cancelled or failed:", e);
+        }
+      } else {
+        // ALREADY SYNCED - EXPAND SIDEBAR FOR FULL METRICS/DISCONNECT
+        const layoutContainer = document.querySelector(".wiki-layout");
+        if (layoutContainer) {
+          layoutContainer.classList.remove("sidebar-collapsed");
+          const exp = document.getElementById("btn-sidebar-expand");
+          if (exp) exp.classList.remove("visible");
+          syncPill.classList.remove("visible");
+          localStorage.setItem("wiki-sidebar-collapsed", "false");
+        }
+      }
+    });
+  }
+
+  // Register listener to update the floating indicator reactively
+  window.addEventListener("wiki-sync-status-changed", () => {
+    updateFloatingSyncPill();
+  });
+
   // Load and query directory handle from IndexedDB
   try {
     const saved = await loadHandle();
@@ -231,6 +328,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   } catch (e) {
     console.error("IndexedDB error loading handle:", e);
   }
+  updateFloatingSyncPill();
 
   // 1. Define Hierarchical Navigation Schema (SWE Wiki Categories)
   const navSchema = [
@@ -475,6 +573,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         layoutContainer.classList.add("sidebar-collapsed");
         const exp = document.getElementById("btn-sidebar-expand");
         if (exp) exp.classList.add("visible");
+        const pill = document.getElementById("floating-sync-indicator");
+        if (pill) pill.classList.add("visible");
         localStorage.setItem("wiki-sidebar-collapsed", "true");
       });
     }
@@ -492,6 +592,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     btnExpand.addEventListener("click", () => {
       layoutContainer.classList.remove("sidebar-collapsed");
       btnExpand.classList.remove("visible");
+      const pill = document.getElementById("floating-sync-indicator");
+      if (pill) pill.classList.remove("visible");
       localStorage.setItem("wiki-sidebar-collapsed", "false");
     });
   }
