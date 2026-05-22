@@ -68,7 +68,7 @@
     "category": "Integration",
     "title": "Google Docs Change Proposal Integration",
     "desc": "Integrate and track community-led Google Docs proposals, design drafts, and RFC updates for the Apache Iceberg spec directly in the wiki explorer.",
-    "status": "completed",
+    "status": "planned",
     "priority": "medium"
   },
   {
