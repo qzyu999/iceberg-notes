@@ -1,0 +1,160 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transaction Semantics — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+<script>
+// Inline tab switcher utility
+function switchRecipeTab(recipeId, version) {
+  const container = document.getElementById(`recipe-${recipeId}`);
+  if (!container) return;
+
+  const tabs = container.querySelectorAll(".recipe-tab");
+  tabs.forEach(tab => {
+    if (tab.getAttribute("data-ver") === version) {
+      tab.classList.add("active");
+    } else {
+      tab.classList.remove("active");
+    }
+  });
+
+  const codes = container.querySelectorAll(".recipe-code");
+  codes.forEach(code => {
+    if (code.getAttribute("data-ver") === version) {
+      code.style.display = "block";
+    } else {
+      code.style.display = "none";
+    }
+  });
+}
+</script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Cookbook Recipe 5</div>
+      <h1>Transaction <em>Semantics</em></h1>
+      <p class="tagline">
+        Understanding lock-free Optimistic Concurrency Control, commit invariants, and serializability safety proofs.
+      </p>
+    </header>
+
+    <!-- SECTION V: OCC AND LOCKS -->
+    <section id="concurrency-locking">
+      <h2>V. Transaction Semantics &amp; Optimistic Concurrency Control (OCC)</h2>
+      <p class="sec-desc">
+        Iceberg allows concurrent writers to execute transactional updates without locks, performing validation assertions at the moment of catalog swap.
+      </p>
+
+      <p>
+        Let $T_{\text{commit}}$ be a transaction reading table state $S_{\text{base}}$ and proposing mutation updates $\Delta = (D_{\text{add}}, D_{\text{del}}, F_{\text{add\_del}}, F_{\text{rem\_del}})$. Let $S_{\text{current}}$ be the current latest snapshot committed in the catalog. If $S_{\text{current}} \neq S_{\text{base}}$, the catalog validation engine **must** assert the following four safety theorems before permitting the pointer swap:
+      </p>
+
+      <div class="equation-box">
+        <div class="eq-label">Invariant 1: Existence Integrity</div>
+        <div class="eq-math">
+          $$\forall f \in F_{\text{add\_del}}, \quad f.\text{target\_path} \in \{ d.\text{path} \mid d \in D_{\text{current}} \}$$
+        </div>
+        <div class="eq-explanation">
+          <strong>Invariant 1:</strong> New delete files added by our transaction must target data files that are still active in $S_{\text{current}}$. Aborts with <code>Cannot delete rows in missing data file</code> if violated.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Invariant 2: No Double Delete</div>
+        <div class="eq-math">
+          $$D_{\text{del}} \cap ( D_{\text{base}} \setminus D_{\text{current}} ) = \emptyset$$
+        </div>
+        <div class="eq-explanation">
+          <strong>Invariant 2:</strong> Data files deleted by our transaction must not have been concurrently removed by another transaction. Aborts with <code>File already deleted by concurrent transaction</code> if violated.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Invariant 3: Serializable Append Conflict</div>
+        <div class="eq-math">
+          $$\forall d \in (D_{\text{current}} \setminus D_{\text{base}}), \quad \text{MatchesPredicate}(d.\text{stats}, \Phi) = \emptyset$$
+        </div>
+        <div class="eq-explanation">
+          <strong>Invariant 3:</strong> Under <code>SERIALIZABLE</code> isolation, no concurrent transaction could have appended data files matching our transaction's delete filter predicate $\Phi$. Aborts with <code>Found conflicting concurrent appends</code> if violated.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Invariant 4: Deletion Vector Integrity</div>
+        <div class="eq-math">
+          $$\forall v \in V_{\text{add}}, \quad v.\text{target\_path} \notin \{ d.\text{path} \mid d \in (D_{\text{base}} \setminus D_{\text{current}}) \}$$
+        </div>
+        <div class="eq-explanation">
+          <strong>Invariant 4:</strong> No concurrent transaction could have rewritten or compacted a data file targeted by our newly added Deletion Vectors. Prevents bit offsets mapping onto missing data.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Theorem 2: Strict Serializability of Commits</div>
+        <div class="eq-math">
+          $$\text{Commit}(\Delta, S_{\text{current}}) \equiv \text{SerialExecution}(S_{\text{current}} \to S_{\text{current+1}})$$
+        </div>
+        <div class="eq-explanation">
+          <strong>Theorem 2:</strong> If the transaction validation invariants (Invariants 1-4) evaluate to true at the moment of catalog commit, the concurrent execution of transaction $\Delta$ against $S_{\text{current}}$ is equivalent to a strictly serial execution where $\Delta$ was executed directly on top of $S_{\text{current}}$.
+        </div>
+      </div>
+
+      <div style="background: var(--oat-l); border-left: 3.5px solid var(--clay); padding: 16px 24px; margin: 20px 0; border-radius: 4px; font-size: 14px;">
+        <strong>Proof of Theorem 2:</strong><br>
+        Let $S_{\text{current}}$ represent the state resulting from the serialization of concurrent transactions committed after $S_{\text{base}}$. We must show that applying $\Delta$ to $S_{\text{current}}$ yields a logically equivalent state to a serial execution.
+        <ol style="margin-top: 8px; margin-bottom: 8px;">
+          <li><strong>By Invariant 2</strong>: Since our deleted files ($D_{\text{del}}$) and concurrently deleted files ($D_{\text{concurrent\_del}}$) are completely disjoint, there are no overlapping file deletions. The physical deletion operations commute perfectly.</li>
+          <li><strong>By Invariant 1</strong>: Since all target data files for our new delete files still exist in $D_{\text{current}}$, no delete records are orphaned.</li>
+          <li><strong>By Invariant 3</strong>: Under serializable isolation, since no concurrently added files match our delete filter predicate $\Phi$, our transaction's deletions would have had zero effect on the concurrent appends. Thus, the operations serialize.</li>
+          <li><strong>By Invariant 4</strong>: Since target data files for our roaring bitmaps were not concurrently deleted or compacted, the bit masks align correctly to the targeted rows.</li>
+        </ol>
+        Because all structural modifications and file changes commute without violating references, the execution is strictly serializable. $\quad \blacksquare$
+      </div>
+
+      <div class="recipe-container" id="recipe-r3">
+        <div class="recipe-header">
+          <div class="recipe-title-text">Engine Concurrency Parameters</div>
+          <div class="recipe-tabs">
+            <button class="recipe-tab active" data-ver="v1" onclick="switchRecipeTab('r3', 'v1')">Hive / JDBC Catalog</button>
+            <button class="recipe-tab" data-ver="v2" onclick="switchRecipeTab('r3', 'v2')">REST / Cloud Catalogs</button>
+          </div>
+        </div>
+        <div class="recipe-code-wrapper">
+          <pre class="recipe-code" data-ver="v1"><code># Optimize Hive Metastore catalog locking retries
+lock.acquisition-timeout-ms = 60000     # Wait up to 60s for lock
+lock.retry-delay-ms = 100               # Retry wait interval
+commit.retry.num-retries = 10           # OCC retry attempts before failing
+commit.retry.min-wait-ms = 100          # Min OCC retry backing off
+commit.retry.max-wait-ms = 1000         # Max OCC retry backing off</code></pre>
+          <pre class="recipe-code" data-ver="v2" style="display: none;"><code># Optimize REST Catalog conditional swaps (No client locks needed)
+client.catalog-implementation = org.apache.iceberg.rest.RESTCatalog
+client.catalog-uri = https://catalog.api.iceberg.org/v1
+
+# Conditional update header checking
+commit.retry.num-retries = 15           # REST catalog retries on 409 Conflict
+commit.retry.min-wait-ms = 50           # Responsive client retry start
+commit.retry.max-wait-ms = 2000         # Maximum exponential backoff</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>

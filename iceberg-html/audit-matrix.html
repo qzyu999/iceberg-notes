@@ -1,0 +1,247 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Binding Parity Matrix — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Specification Section IV</div>
+      <h1>Binding Parity <em>Matrix</em></h1>
+      <p class="tagline">
+        Auditing specification compliance and multi-language architectural alignment across all reference implementations.
+      </p>
+    </header>
+
+    <section id="matrix-overview">
+      <h2>1. The Parity Objective</h2>
+      <p>
+        To eliminate engine boundaries and prevent language-specific silos, the Apache Iceberg format requires strict feature alignment across its key developer implementations. Upstream bindings like <strong>pyiceberg</strong> and <strong>iceberg-rust</strong> must guarantee semantic equivalence to <strong>iceberg-java</strong> core interfaces.
+      </p>
+      <p>
+        This matrix functions as the single source of truth for the active state of all reference implementations, specifically tracking <strong>iceberg-go</strong> and the emerging <strong>iceberg-c++</strong> bindings.
+      </p>
+    </section>
+
+    <section id="interactive-matrix">
+      <h2>2. Implementation Parity Table</h2>
+      <p class="sec-desc">
+        Filter feature domains and search specific specifications to trace where bindings stand.
+      </p>
+
+      <!-- Filter Controls -->
+      <div style="display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; background: var(--paper); padding: 16px; border: 1.5px solid var(--g300); border-radius: 8px;">
+        <div style="flex: 2; min-width: 220px; display: flex; align-items: center; background: var(--ivory); border: 1px solid var(--g300); border-radius: 6px; padding: 0 12px; height: 38px;">
+          <input type="text" id="matrix-search" placeholder="Search features or specs..." style="border: none; outline: none; background: transparent; font-size: 13px; width: 100%; color: var(--slate); font-family: var(--sans);">
+        </div>
+        <div style="flex: 1; min-width: 140px;">
+          <select id="matrix-domain-filter" style="width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--g300); border-radius: 6px; background: var(--ivory); font-size: 12.5px; color: var(--slate); cursor: pointer; outline: none;">
+            <option value="all">All Domains</option>
+            <option value="core">Core Invariants</option>
+            <option value="evolution">Evolution Gates</option>
+            <option value="row-level">Row-level Deletes</option>
+            <option value="maintenance">Maintenance &amp; Ops</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Parity Matrix Container -->
+      <div class="parity-table-container">
+        <table class="parity-table">
+          <thead>
+            <tr>
+              <th style="width: 25%;">Feature Capability</th>
+              <th style="width: 15%; text-align: center;">Java Core</th>
+              <th style="width: 15%; text-align: center;">PyIceberg</th>
+              <th style="width: 15%; text-align: center;">Iceberg Rust</th>
+              <th style="width: 15%; text-align: center;">Iceberg Go</th>
+              <th style="width: 15%; text-align: center;">Iceberg C++</th>
+            </tr>
+          </thead>
+          <tbody id="matrix-rows">
+            <!-- Row 1: OCC -->
+            <tr class="matrix-row" data-domain="core" data-keywords="occ atomic commits swap pointer v1 v2 v3">
+              <td>
+                <div class="feat-name">Optimistic OCC</div>
+                <div class="feat-subtitle">Atomic commits via root pointer swap validations.</div>
+              </td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge partial">Partial</span></td>
+            </tr>
+
+            <!-- Row 2: Schema Evolution -->
+            <tr class="matrix-row" data-domain="evolution" data-keywords="schema evolution nested fields projection tracking">
+              <td>
+                <div class="feat-name">Schema Evolution</div>
+                <div class="feat-subtitle">Field ID assignments &amp; nested type projections.</div>
+              </td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge partial">Partial</span></td>
+            </tr>
+
+            <!-- Row 3: Partition Spec Evolution -->
+            <tr class="matrix-row" data-domain="evolution" data-keywords="partition spec evolution transform dynamic pruning">
+              <td>
+                <div class="feat-name">Partition Spec Evolution</div>
+                <div class="feat-subtitle">Handling mixed partition specs inside scans.</div>
+              </td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge partial">Partial</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+            </tr>
+
+            <!-- Row 4: Position Deletes (Read) -->
+            <tr class="matrix-row" data-domain="row-level" data-keywords="position deletes read mor format v2 roaring bitmaps">
+              <td>
+                <div class="feat-name">Position Deletes (Read)</div>
+                <div class="feat-subtitle">Reading V2 tables containing position delete Parquet files.</div>
+              </td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+            </tr>
+
+            <!-- Row 5: Position Deletes (Write) -->
+            <tr class="matrix-row" data-domain="row-level" data-keywords="position deletes write mor rowdelta writes">
+              <td>
+                <div class="feat-name">Position Deletes (Write)</div>
+                <div class="feat-subtitle">Writing position delete Parquet files during mutations.</div>
+              </td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+              <td style="text-align: center;"><span class="badge partial">Partial</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+            </tr>
+
+            <!-- Row 6: Equality Deletes (Read) -->
+            <tr class="matrix-row" data-domain="row-level" data-keywords="equality deletes read mor hash joins column match">
+              <td>
+                <div class="feat-name">Equality Deletes (Read)</div>
+                <div class="feat-subtitle">Reading tables containing Equality Delete Parquet files.</div>
+              </td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge partial">Partial</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+            </tr>
+
+            <!-- Row 7: Deletion Vectors (Read) -->
+            <tr class="matrix-row" data-domain="row-level" data-keywords="deletion vectors dv read format v3 puffin files">
+              <td>
+                <div class="feat-name">Deletion Vectors (Read)</div>
+                <div class="feat-subtitle">Highly compressed Puffin-based bit arrays in V3.</div>
+              </td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge partial">Partial</span></td>
+              <td style="text-align: center;"><span class="badge partial">Partial</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+            </tr>
+
+            <!-- Row 8: Compaction Actions -->
+            <tr class="matrix-row" data-domain="maintenance" data-keywords="compaction rewrite data files replace commits small files">
+              <td>
+                <div class="feat-name">Data Compaction</div>
+                <div class="feat-subtitle">Rewriting small data files into larger layouts via REPLACE.</div>
+              </td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge partial">Partial</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+            </tr>
+
+            <!-- Row 9: Expire Snapshots -->
+            <tr class="matrix-row" data-domain="maintenance" data-keywords="expire snapshots cleanup manifest expiration storage history">
+              <td>
+                <div class="feat-name">Snapshot Expiration</div>
+                <div class="feat-subtitle">Removing historical snapshots and orphan Parquet/Avro records.</div>
+              </td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+            </tr>
+
+            <!-- Row 10: Delete Orphan Files -->
+            <tr class="matrix-row" data-domain="maintenance" data-keywords="delete orphan files physical filesystem walk clean untracked">
+              <td>
+                <div class="feat-name">Delete Orphan Files</div>
+                <div class="feat-subtitle">Scanning directories and purging unreferenced storage files.</div>
+              </td>
+              <td style="text-align: center;"><span class="badge supported">Supported</span></td>
+              <td style="text-align: center;"><span class="badge partial">Partial</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+              <td style="text-align: center;"><span class="badge unsupported">Unsupported</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Dynamic Search & Filtering Script -->
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const searchInput = document.getElementById("matrix-search");
+    const domainFilter = document.getElementById("matrix-domain-filter");
+    const rows = document.querySelectorAll(".matrix-row");
+
+    function applyFilters() {
+      const q = searchInput.value.toLowerCase().trim();
+      const selectedDomain = domainFilter.value;
+
+      rows.forEach(row => {
+        const rowDomain = row.getAttribute("data-domain");
+        const keywords = row.getAttribute("data-keywords").toLowerCase();
+        const title = row.querySelector(".feat-name").textContent.toLowerCase();
+        const sub = row.querySelector(".feat-subtitle").textContent.toLowerCase();
+
+        const domainMatch = (selectedDomain === "all" || rowDomain === selectedDomain);
+        const searchMatch = (!q || keywords.includes(q) || title.includes(q) || sub.includes(q));
+
+        if (domainMatch && searchMatch) {
+          row.style.display = "";
+        } else {
+          row.style.display = "none";
+        }
+      });
+    }
+
+    searchInput.addEventListener("input", applyFilters);
+    domainFilter.addEventListener("change", applyFilters);
+  });
+</script>
+</body>
+</html>

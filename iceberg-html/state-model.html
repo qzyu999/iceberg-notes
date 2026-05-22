@@ -1,0 +1,166 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Formal State Model — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Cookbook Recipe 1</div>
+      <h1>Formal State <em>Model</em></h1>
+      <p class="tagline">
+        Understanding the Apache Iceberg state machine through formal sets, structural tuples, and algebraic invariants.
+      </p>
+    </header>
+
+    <!-- SECTION I: FOUNDATION -->
+    <section id="table-foundation">
+      <h2>I. The Mathematical Model &amp; Core Axioms</h2>
+      <p class="sec-desc">
+        To construct a logically sound data lakehouse, the Apache Iceberg format defines the table structure and its physical files as an immutable state machine governed by algebraic invariants rather than transient database catalogs.
+      </p>
+
+      <p>
+        Let $\mathcal{U}_{\text{URI}}$ be the universe of valid Uniform Resource Indicators, and $\mathcal{U}_{\text{ID}} \subset \mathbb{N}$ be the universe of unique Field Identifiers. The structural foundation of the table is defined as follows:
+      </p>
+
+      <div class="equation-box">
+        <div class="eq-label">Definition 1: Schema</div>
+        <div class="eq-math">
+          $$\Sigma \subset \{ (id, name, type, required) \mid id \in \mathcal{U}_{\text{ID}}, name \in \text{String}, type \in \text{Type}, required \in \mathbb{B} \}$$
+        </div>
+        <div class="eq-explanation">
+          A table schema $\Sigma$ is a directed acyclic structure mapping stable, unique field identifiers to specific physical typed attributes.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Definition 2: Partition Specification</div>
+        <div class="eq-math">
+          $$P = \{ (source\_id, field\_id, \tau, name) \}$$
+        </div>
+        <div class="eq-explanation">
+          A partition spec $P$ of schema $\Sigma$ is a set of transform mappings, where $source\_id \in \text{Domain}(\Sigma)$, $field\_id \in \mathcal{U}_{\text{ID}}$, $\tau: \text{Type}(source\_id) \to \text{PartitionType}$ is a deterministic transformation function, and $name \in \text{String}$.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Definition 3: Physical File</div>
+        <div class="eq-math">
+          $$f = (path, type, spec\_id, partition, stats)$$
+        </div>
+        <div class="eq-explanation">
+          A physical file $f$ is a 5-tuple where $path \in \mathcal{U}_{\text{URI}}$ is the unique storage locator, $type \in \{ \text{Data}, \text{EqualityDelete}, \text{PositionDelete}, \text{DeletionVector} \}$, $spec\_id \in \mathbb{N}_0$ is the active spec ID, $partition$ represents the partition values, and $stats$ tracks null bounds and min/max metrics.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Definition 4: Manifest Entry</div>
+        <div class="eq-math">
+          $$e = (status, sequence\_number, file\_sequence\_number, file)$$
+        </div>
+        <div class="eq-explanation">
+          A manifest entry $e$ acts as the metadata envelope tracking whether a file is $\text{Existing}$, $\text{Added}$, or $\text{Deleted}$, annotated with transaction sequence numbers.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Definition 5: Table State Snapshot</div>
+        <div class="eq-math">
+          $$S_k = (D_k, F_{e, k}, F_{p, k}, V_{d, k})$$
+        </div>
+        <div class="eq-explanation">
+          A snapshot $S_k$ representing commit version $k$ is a 4-tuple consisting of the active set of Data Files ($D_k$), Equality Delete Files ($F_{e, k}$), Position Delete Files ($F_{p, k}$), and Deletion Vector Puffin blobs ($V_{d, k}$).
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Definition 6: The Table History</div>
+        <div class="eq-math">
+          $$T = \langle S_0, S_1, S_2, \dots, S_n \rangle$$
+        </div>
+        <div class="eq-explanation">
+          An Iceberg table $T$ is an ordered, append-only sequence of immutable state snapshots driven by atomic metadata catalog swaps.
+        </div>
+      </div>
+
+      <h3>Core Algebraic Invariants</h3>
+      <p>
+        To ensure correct distributed processing, the table state transitions are governed by three core axioms:
+      </p>
+      <ul>
+        <li>
+          <strong>Axiom 1: Physical File Immutability</strong> — Once written to storage, a physical file is mathematically immutable: 
+          $$\forall f \in S_i, \quad \text{Content}(f.\text{path}, t) = \text{Content}(f.\text{path}, t + \delta)$$
+        </li>
+        <li>
+          <strong>Axiom 2: Monotonicity of Sequence Numbers</strong> — The transaction sequence number strictly increases across snapshots: 
+          $$\forall S_i, S_j \in T, \quad i &lt; j \implies \text{Seq}(S_i) &lt; \text{Seq}(S_j)$$
+        </li>
+        <li>
+          <strong>Axiom 3: Field ID Uniqueness &amp; Lifecycle Stability</strong> — Under all schema evolution mappings $\Sigma \to \Sigma'$, field IDs remain permanently stable: 
+          $$\forall id \in \text{Domain}(\Sigma) \cap \text{Domain}(\Sigma'), \quad \text{Type}(id, \Sigma) = \text{Type}(id, \Sigma')$$
+        </li>
+      </ul>
+
+      <h3>💡 Concept Mapping &amp; Plain English Mappings</h3>
+      <div class="parity-table-container">
+        <table class="parity-table">
+          <thead>
+            <tr>
+              <th style="width: 25%;">Symbol / Set</th>
+              <th style="width: 25%;">Formal Concept Name</th>
+              <th style="width: 50%;">Plain English Translation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>$T$</strong></td>
+              <td>The Table History</td>
+              <td>A timeline or movie reel of all snapshots from table creation to the latest metadata pointer.</td>
+            </tr>
+            <tr>
+              <td><strong>$S_k$</strong></td>
+              <td>Table State Snapshot</td>
+              <td>A single static capture frame of the table. A JSON/Avro tree tracking all active files.</td>
+            </tr>
+            <tr>
+              <td><strong>$D_k$</strong></td>
+              <td>Active Data Files</td>
+              <td>The actual Parquet files stored in cloud object storage that hold your row records.</td>
+            </tr>
+            <tr>
+              <td><strong>$F_{e, k}$ / $F_{p, k}$</strong></td>
+              <td>Delete Log Files</td>
+              <td>Metadata rule lists specifying row drops (equality conditions or exact line numbers).</td>
+            </tr>
+            <tr>
+              <td><strong>$V_{d, k}$</strong></td>
+              <td>Deletion Vectors</td>
+              <td>Highly optimized Roaring Bitmaps flagging exactly which physical row indexes are logically deleted.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>

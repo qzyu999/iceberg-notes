@@ -1,0 +1,131 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Performance Profiles — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+<script>
+// Inline tab switcher utility
+function switchRecipeTab(recipeId, version) {
+  const container = document.getElementById(`recipe-${recipeId}`);
+  if (!container) return;
+
+  const tabs = container.querySelectorAll(".recipe-tab");
+  tabs.forEach(tab => {
+    if (tab.getAttribute("data-ver") === version) {
+      tab.classList.add("active");
+    } else {
+      tab.classList.remove("active");
+    }
+  });
+
+  const codes = container.querySelectorAll(".recipe-code");
+  codes.forEach(code => {
+    if (code.getAttribute("data-ver") === version) {
+      code.style.display = "block";
+    } else {
+      code.style.display = "none";
+    }
+  });
+}
+</script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Cookbook Recipe 4</div>
+      <h1>Performance <em>Profiles</em></h1>
+      <p class="tagline">
+        Comparing Copy-on-Write and Merge-on-Read amplification curves, Shannon entropy limits, and bitmap compression container layouts.
+      </p>
+    </header>
+
+    <!-- SECTION IV: COW VS MOR PERFORMANCE -->
+    <section id="cow-vs-mor">
+      <h2>IV. Copy-on-Write vs. Merge-on-Read Performance Mechanics</h2>
+      <p class="sec-desc">
+        Iceberg allows administrators to tune tables precisely between read-optimized Copy-on-Write and write-optimized Merge-on-Read performance profiles.
+      </p>
+
+      <h3>1. Write/Read Amplification Equations</h3>
+      <p>
+        Let $D_{\text{target}}$ be the set of data files targeted for mutations, $R_{\text{mut}}$ be the records physically modified, and $R_{\text{total}}$ be the total rows in $D_{\text{target}}$.
+      </p>
+
+      <div class="equation-box">
+        <div class="eq-label">Copy-on-Write Metrics</div>
+        <div class="eq-math">
+          $$\text{WAF}_{\text{CoW}} = \frac{\sum_{d \in D_{\text{target}}} \text{SizeOf}(d)}{\text{SizeOf}(R_{\text{mut}})} \approx \frac{\text{SizeOf}(R_{\text{total}})}{\text{SizeOf}(R_{\text{mut}})} \quad , \quad \text{RAF}_{\text{CoW}} = 1.0$$
+        </div>
+        <div class="eq-explanation">
+          COW forces an eager rewrite of the entire target data file to apply modifications. This leads to extremely high Write Amplification ($\text{WAF}_{\text{CoW}}$) but keeps Read Amplification ($\text{RAF}_{\text{CoW}}$) at a perfect $1.0$.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Merge-on-Read Metrics</div>
+        <div class="eq-math">
+          $$\text{WAF}_{\text{MoR}} = \frac{\text{SizeOf}(F_{\text{del}})}{\text{SizeOf}(R_{\text{mut}})} \approx O(1) \quad , \quad \text{RAF}_{\text{MoR}} = \frac{\sum_{d \in D} \text{I/O}(d) + \sum_{f \in F_{\text{del}}} \text{I/O}(f)}{\sum_{d \in D} \text{I/O}(d)} > 1.0$$
+        </div>
+        <div class="eq-explanation">
+          MOR appends deletes as a small metadata log file ($F_{\text{del}}$), leaving original data files untouched. This yields near-zero write amplification but increases the read amplification penalty ($\text{RAF}_{\text{MoR}}$) during multi-file scans.
+        </div>
+      </div>
+
+      <h3>2. Shannon Entropy Limits &amp; Deletion Vector Roaring Containers</h3>
+      <p>
+        To minimize network RTT and object storage space, Deletion Vectors compress row offsets using **Roaring Bitmaps**. Under Shannon's information theory, the minimum average number of bits required to represent $M$ deleted offsets in a file of $N$ rows is bounded by the entropy:
+        $$H_{\text{opt}} \approx \log_2 \binom{N}{M}$$
+      </p>
+      <p>
+        Roaring Bitmaps compress offsets dynamically into $2^{16}$ row-chunk containers:
+      </p>
+      <ul>
+        <li style="margin-bottom: 6px;"><strong>Array Container:</strong> Used when $M_{\text{chunk}} &lt; 4096$. Stores sorted 16-bit integers ($16\text{ bits/offset}$).</li>
+        <li style="margin-bottom: 6px;"><strong>Bitmap Container:</strong> Used when $M_{\text{chunk}} \ge 4096$. Stores a dense bit array of $2^{16}$ bits ($65536\text{ bits}$ total, yielding $\le 16\text{ bits/offset}$).</li>
+        <li style="margin-bottom: 6px;"><strong>Run-Length Encoding (RLE) Container:</strong> Stores contiguous runs as 16-bit pairs of <code>(start_offset, run_length)</code> ($32\text{ bits/run}$), compressing bulk deletions down to a few bytes.</li>
+      </ul>
+
+      <div class="recipe-container" id="recipe-r4">
+        <div class="recipe-header">
+          <div class="recipe-title-text">Table Mode Settings (COW vs. MOR)</div>
+          <div class="recipe-tabs">
+            <button class="recipe-tab active" data-ver="v1" onclick="switchRecipeTab('r4', 'v1')">Copy-On-Write Configuration</button>
+            <button class="recipe-tab" data-ver="v2" onclick="switchRecipeTab('r4', 'v2')">Merge-On-Read Configuration</button>
+          </div>
+        </div>
+        <div class="recipe-code-wrapper">
+          <pre class="recipe-code" data-ver="v1"><code># Table Properties for strict Copy-On-Write enforcement
+write.delete.mode = copy-on-write       # Delete rows by rewriting parquet files
+write.update.mode = copy-on-write       # Update rows by rewriting parquet files
+write.merge.mode = copy-on-write        # MERGE operations rewrite whole files</code></pre>
+          <pre class="recipe-code" data-ver="v2" style="display: none;"><code># Table Properties for high-throughput Merge-On-Read
+write.delete.mode = merge-on-read        # Delete writes immediate V2 Delete Files
+write.update.mode = merge-on-read        # Update writes positional/equality deletes
+write.merge.mode = merge-on-read         # MERGE writes appends instead of rewrites
+
+# Specific Delete Vector Formats
+write.delete.format = positional         # Positional deletes (fast scanning)
+# write.delete.format = equality         # Equality deletes (fast writing)</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>

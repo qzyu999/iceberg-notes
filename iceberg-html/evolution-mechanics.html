@@ -1,0 +1,157 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schema &amp; Spec Evolution — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+<script>
+// Inline tab switcher utility
+function switchRecipeTab(recipeId, version) {
+  const container = document.getElementById(`recipe-${recipeId}`);
+  if (!container) return;
+
+  const tabs = container.querySelectorAll(".recipe-tab");
+  tabs.forEach(tab => {
+    if (tab.getAttribute("data-ver") === version) {
+      tab.classList.add("active");
+    } else {
+      tab.classList.remove("active");
+    }
+  });
+
+  const codes = container.querySelectorAll(".recipe-code");
+  codes.forEach(code => {
+    if (code.getAttribute("data-ver") === version) {
+      code.style.display = "block";
+    } else {
+      code.style.display = "none";
+    }
+  });
+}
+</script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Cookbook Recipe 2</div>
+      <h1>Schema &amp; Spec <em>Evolution</em></h1>
+      <p class="tagline">
+        Understanding metadata-only inplace schema modifications and partition specification transformations.
+      </p>
+    </header>
+
+    <!-- SECTION II: EVOLUTION -->
+    <section id="schema-evolution">
+      <h2>II. Schema &amp; Partition Spec Evolution Mechanics</h2>
+      <p class="sec-desc">
+        In traditional table formats, renaming, adding, or deleting fields requires a full rewrite of physical data files. Apache Iceberg guarantees metadata-only, inplace schema and partition spec updates.
+      </p>
+      <p>
+        By relying on <strong>Axiom 3 (Field ID Stability)</strong>, the schema decouples logical column names from the underlying physical structures. Click the tabs in the code sandbox below to see the precise JSON state transition when renaming <code>user_id</code> to <code>account_id</code> and adding a new column <code>last_login</code>:
+      </p>
+
+      <div class="recipe-container" id="recipe-r1">
+        <div class="recipe-header">
+          <div class="recipe-title-text">JSON Schema Metadata Transition</div>
+          <div class="recipe-tabs">
+            <button class="recipe-tab active" data-ver="v1" onclick="switchRecipeTab('r1', 'v1')">v1: Original Schema</button>
+            <button class="recipe-tab" data-ver="v2" onclick="switchRecipeTab('r1', 'v2')">v2: Evolved Schema</button>
+          </div>
+        </div>
+        <div class="recipe-code-wrapper">
+          <pre class="recipe-code" data-ver="v1"><code>{
+  "schema-id": 0,
+  "type": "struct",
+  "fields": [
+    { "id": 1, "name": "user_id", "required": true, "type": "long" },
+    { "id": 2, "name": "email", "required": false, "type": "string" }
+  ]
+}</code></pre>
+          <pre class="recipe-code" data-ver="v2" style="display: none;"><code>{
+  "schema-id": 1,
+  "type": "struct",
+  "fields": [
+    /* Column 1 is renamed but preserves Field ID 1. Data files are NOT touched. */
+    { "id": 1, "name": "account_id", "required": true, "type": "long" },
+    { "id": 2, "name": "email", "required": false, "type": "string" },
+    /* Column 3 is added with a newly allocated Field ID 3. */
+    { "id": 3, "name": "last_login", "required": false, "type": "timestamptz" }
+  ]
+}</code></pre>
+        </div>
+      </div>
+
+      <p>
+        Similarly, when partition specs evolve (e.g. daily partitions become too large and require hourly partitions), existing data files remain unchanged. The table metadata tracks multiple active partition specifications, mapping each data file to its respective <code>spec-id</code>:
+      </p>
+
+      <div class="recipe-container" id="recipe-r2">
+        <div class="recipe-header">
+          <div class="recipe-title-text">Partition Spec Configuration</div>
+          <div class="recipe-tabs">
+            <button class="recipe-tab active" data-ver="v1" onclick="switchRecipeTab('r2', 'v1')">Spec 0: Daily Partitioning</button>
+            <button class="recipe-tab" data-ver="v2" onclick="switchRecipeTab('r2', 'v2')">Spec 1: Hourly Partitioning</button>
+          </div>
+        </div>
+        <div class="recipe-code-wrapper">
+          <pre class="recipe-code" data-ver="v1"><code>{
+  "default-spec-id": 0,
+  "partition-specs": [
+    {
+      "spec-id": 0,
+      "fields": [
+        {
+          "source-id": 4,          /* timestamp column */
+          "field-id": 1000,
+          "name": "event_date",
+          "transform": "day"       /* Partitioned by date */
+        }
+      ]
+    }
+  ]
+}</code></pre>
+          <pre class="recipe-code" data-ver="v2" style="display: none;"><code>{
+  "default-spec-id": 1,
+  "partition-specs": [
+    {
+      "spec-id": 0,
+      "fields": [
+        { "source-id": 4, "field-id": 1000, "name": "event_date", "transform": "day" }
+      ]
+    },
+    {
+      "spec-id": 1,
+      "fields": [
+        /* Evolved Spec 1 splits events by hour of day for higher write volume */
+        {
+          "source-id": 4,
+          "field-id": 1001,
+          "name": "event_hour",
+          "transform": "hour"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>

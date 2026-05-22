@@ -1,0 +1,109 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maintenance &amp; Compaction — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Cookbook Recipe 6</div>
+      <h1>Maintenance &amp; <em>Compaction</em></h1>
+      <p class="tagline">
+        Understanding structural compaction constraints, snapshot expiration, and storage garbage collection safety proofs.
+      </p>
+    </header>
+
+    <!-- SECTION VI: COMPACTION -->
+    <section id="compaction-maintenance">
+      <h2>VI. Compaction &amp; Storage Maintenance</h2>
+      <p class="sec-desc">
+        Maintenance pipelines physically rewrite table structures to optimize scan paths and reclaim storage, ensuring zero changes to active logical rows.
+      </p>
+
+      <h3>1. Data Compaction &amp; Parity</h3>
+      <p>
+        Let $D_{\text{frag}} \subset D_k$ be a subset of fragmented data files targeted for compaction. The compaction operator $\Gamma_{\text{compact}}$ writes a set of consolidated data files $D_{\text{new}}$:
+        $$\Gamma_{\text{compact}}(D_{\text{frag}}) \to D_{\text{new}}$$
+      </p>
+
+      <div class="equation-box">
+        <div class="eq-label">Axiomatic Constraint of Compaction</div>
+        <div class="eq-math">
+          $$\bigcup_{d \in D_{\text{frag}}} \text{ActiveRows}(d, S_k) \equiv \bigcup_{d' \in D_{\text{new}}} \text{ActiveRows}(d', S_k)$$
+        </div>
+        <div class="eq-explanation">
+          Compaction must maintain perfect logical row parity while drastically reducing physical file counts ($|D_{\text{new}}| \ll |D_{\text{frag}}|$).
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Theorem 3: Compaction Safety and Equivalence</div>
+        <div class="eq-math">
+          $$\text{ActiveRows}(D_{\text{new}}, S_j) \equiv \text{ActiveRows}(D_{\text{frag}}, S_j) \quad \forall S_j \ge S_{k+1}$$
+        </div>
+        <div class="eq-explanation">
+          <strong>Theorem 3:</strong> Applying compaction $\Gamma_{\text{compact}}$ is a safe metadata transition that does not alter the logical row projection of the table for any future snapshot state.
+        </div>
+      </div>
+
+      <div style="background: var(--oat-l); border-left: 3.5px solid var(--clay); padding: 16px 24px; margin: 20px 0; border-radius: 4px; font-size: 14px;">
+        <strong>Proof of Theorem 3:</strong><br>
+        Let $S_{k+1}$ be the compaction commit snapshot. By the axiomatic constraint of compaction, $\text{ActiveRows}(D_{\text{frag}}, S_k) = \text{ActiveRows}(D_{\text{new}}, S_k)$.
+        Now consider a future snapshot $S_j$ ($j &gt; k$) where a concurrent transaction appends a delete file $f_d$:
+        <ol style="margin-top: 8px; margin-bottom: 8px;">
+          <li><strong>Scenario A (Delete committed before Compaction)</strong>: The delete file $f_d$ has sequence number $s_d \le s_k$. The compaction process reads active rows <i>after</i> applying $f_d$, meaning deleted rows are already filtered out and are not written to $D_{\text{new}}$. Thus, row identity is preserved.</li>
+          <li><strong>Scenario B (Delete committed after Compaction)</strong>: The delete file $f_d$ has sequence number $s_d \ge s_{k+1}$. It cannot target $D_{\text{frag}}$ because $D_{\text{frag}}$ is no longer active. The transaction instead writes the delete targeting $D_{\text{new}}$, resolving the active row set correctly.</li>
+        </ol>
+        Thus, the logical row projection remains completely invariant. $\quad \blacksquare$
+      </div>
+
+      <h3>2. Gated Storage Pruning</h3>
+      <p>
+        Snapshot expiration $\Gamma_{\text{expire}}$ retains a subset of snapshots based on age history $\Delta t_{\text{max}}$:
+        $$\Gamma_{\text{expire}}(T) \to T' = \langle S_m, \dots, S_n \rangle$$
+        where $m = \max \{ i \mid \text{Time}(S_i) &lt; \text{Now}() - \Delta t_{\text{max}} \}$. Any physical files referenced in expired snapshots $\{ S_0, \dots, S_{m-1} \}$ that are not referenced in any retained snapshot $S \in T'$ are marked for physical deletion.
+      </p>
+
+      <div class="equation-box">
+        <div class="eq-label">Theorem 4: Storage Pruning Safety</div>
+        <div class="eq-math">
+          $$\forall f \in F_{\text{delete}}, \quad \text{Now}() - \text{MTime}(f) &gt; \Delta t_{\text{grace}}$$
+        </div>
+        <div class="eq-explanation">
+          <strong>Theorem 4:</strong> Let $F_{\text{delete}}$ be the set of physical files targeted for physical deletion by snapshot expiration or orphan cleanup. If table GC is enabled and all targeted files have a modification age older than the grace period $\Delta t_{\text{grace}}$ (default 24 hours), then physical deletion is guaranteed to never cause data loss or corrupt concurrent active transactions.
+        </div>
+      </div>
+
+      <div style="background: var(--oat-l); border-left: 3.5px solid var(--clay); padding: 16px 24px; margin: 20px 0; border-radius: 4px; font-size: 14px;">
+        <strong>Proof of Theorem 4:</strong><br>
+        Suppose a file $f \in F_{\text{delete}}$ is deleted and this deletion corrupts an active concurrent transaction $T_{\text{concurrent}}$ committing at $t_{\text{commit}} &gt; \text{Now}()$:
+        <ol style="margin-top: 8px; margin-bottom: 8px;">
+          <li><strong>Case 1: $f$ is a data file needed by $T_{\text{concurrent}}$</strong>. If $f$ was written by an active concurrent transaction, its modification age is bounded by the transaction duration, which is less than the grace period:
+          $$\text{Now}() - \text{MTime}(f) \le \text{Duration}(T_{\text{concurrent}}) &lt; \Delta t_{\text{grace}}$$
+          But this contradicts our safety gate constraint: $\text{Now}() - \text{MTime}(f) &gt; \Delta t_{\text{grace}}$. Thus, $f$ could not have been written by any active concurrent transaction.</li>
+          <li><strong>Case 2: $f$ was active in the catalog but marked for cleanup</strong>. For the expiration algorithm to classify $f$ as unreferenced, it must have traversed all active metadata paths starting from the linearizable catalog pointer. Since $f$ is unreferenced in all active snapshots $S \in T'$ and $T_{\text{concurrent}}$ branches from some active state $S_{\text{base}} \in T'$, $T_{\text{concurrent}}$ could never reference $f$ because $f$ was already removed from the metadata tree prior to $S_{\text{base}}$.</li>
+        </ol>
+        Thus, $f$ is completely unreachable by any current or future reader branching from the catalog. Deleting $F_{\text{delete}}$ is perfectly safe. $\quad \blacksquare$
+      </div>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>

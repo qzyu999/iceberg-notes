@@ -1,0 +1,181 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logical Row Projection — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Cookbook Recipe 3</div>
+      <h1>Logical Row <em>Projection</em></h1>
+      <p class="tagline">
+        Formalizing the Merge-on-Read resolution path, deletion indicators, and correctness theorems.
+      </p>
+    </header>
+
+    <!-- SECTION III: READ PATH AND MOR RESOLUTION -->
+    <section id="mor-resolution">
+      <h2>III. Formal Specification of the Read Path (Logical Row Projection)</h2>
+      <p class="sec-desc">
+        Under Merge-on-Read, physical records must be dynamically reconciled with deleted rows at query execution time. This section establishes the algebraic correction formulas that query engines use to guarantee logical consistency.
+      </p>
+
+      <p>
+        Let $d \in D_k$ be a physical data file containing an ordered sequence of records, and let $I_d = [0, |d| - 1] \subset \mathbb{N}_0$ be the physical index space of the row offsets within $d$.
+      </p>
+
+      <div class="equation-box">
+        <div class="eq-label">Record Locator Offset mapping</div>
+        <div class="eq-math">
+          $$\text{Record}_d: I_d \to \text{Row}$$
+        </div>
+        <div class="eq-explanation">
+          A physical record selector function that points to a specific physical line number (index $i$) in data file $d$ to retrieve its fields.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Active Logical Rows</div>
+        <div class="eq-math">
+          $$\text{ActiveRows}(d, S_k) = \{ \text{Record}_d(i) \mid i \in I_d \land \Psi(d, i, S_k) = 0 \}$$
+        </div>
+        <div class="eq-explanation">
+          The final set of logical rows returned to the client after filtering out all physically deleted records under state snapshot $S_k$.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Composite Delete Indicator Function</div>
+        <div class="eq-math">
+          $$\Psi(d, i, S_k) = \mathbb{I} \left[ \Psi_{\text{pos}}(d, i, S_k) = 1 \lor \Psi_{\text{dv}}(d, i, S_k) = 1 \lor \Psi_{\text{eq}}(d, i, S_k) = 1 \right]$$
+        </div>
+        <div class="eq-explanation">
+          Evaluates to $1$ (logically deleted) if any of the three physical delete indicators (Positional, Deletion Vector, or Equality rule) matches the row offset $i$.
+        </div>
+      </div>
+
+      <p>
+        Where the individual physical delete indicators evaluate as:
+      </p>
+      <ol>
+        <li style="margin-bottom: 12px;">
+          <strong>Positional Delete Indicator:</strong>
+          $$\Psi_{\text{pos}}(d, i, S_k) = \mathbb{I} \left[ \exists f_p \in F_{p, k} \text{ s.t. } f_p.\text{path} = d.\text{path} \land f_p.\text{pos} = i \land S_{\text{data}}(d) &lt; S_{\text{delete}}(f_p) \right]$$
+        </li>
+        <li style="margin-bottom: 12px;">
+          <strong>Deletion Vector (Roaring Bitmap) Indicator:</strong>
+          $$\Psi_{\text{dv}}(d, i, S_k) = \mathbb{I} \left[ \exists v_d \in V_{d, k} \text{ s.t. } v_d.\text{target\_path} = d.\text{path} \land i \in \text{Bitmap}(v_d) \land S_{\text{data}}(d) &lt; S_{\text{delete}}(v_d) \right]$$
+        </li>
+        <li style="margin-bottom: 12px;">
+          <strong>Equality Delete Rule Indicator:</strong>
+          $$\Psi_{\text{eq}}(d, i, S_k) = \mathbb{I} \left[ \exists f_e \in F_{e, k} \text{ s.t. } \Pi_{A}( \text{Record}_d(i) ) = \Pi_{A}(r_{f_e}) \land S_{\text{data}}(d) &lt; S_{\text{delete}}(f_e) \right]$$
+          where $A \subset \mathcal{U}_{\text{ID}}$ represents the set of equality field IDs, and $\Pi$ is the projection operator.
+        </li>
+      </ol>
+
+      <div class="equation-box">
+        <div class="eq-label">Theorem 1: Correctness of MoR Resolution</div>
+        <div class="eq-math">
+          $$\text{ActiveRows}(d, S_k) \equiv \text{CoW}(d, S_k)$$
+        </div>
+        <div class="eq-explanation">
+          <strong>Theorem 1:</strong> The Merge-on-Read logical projection $\text{ActiveRows}(d, S_k)$ evaluates to the identical logical state as a Copy-on-Write rewrite $\text{CoW}(d, S_k)$ executed at snapshot $S_k$.
+        </div>
+      </div>
+
+      <div style="background: var(--oat-l); border-left: 3.5px solid var(--clay); padding: 16px 24px; margin: 20px 0; border-radius: 4px; font-size: 14px;">
+        <strong>Proof of Theorem 1:</strong><br>
+        By definition, a Copy-on-Write operation at snapshot $S_k$ reads physical records and filters them eagerly using the deletion rules active in $S_k$. The resulting rewritten data file $d'$ contains:
+        $$d' = \{ r \mid r = \text{Record}_d(i) \land i \in I_d \land \neg \text{MatchesDeletedRules}(r, S_k) \}$$
+        Let us analyze the deletion rules evaluation. The function $\text{MatchesDeletedRules}(r, S_k)$ returns true if and only if $r$ was deleted via any active deletion mechanism committed between $S_{i+1}$ and $S_k$:
+        <ol style="margin-top: 8px; margin-bottom: 8px;">
+          <li>If a positional delete exists for $(d.\text{path}, i)$ committed at sequence $s_p \le s_k$, then since $d$ was created at $s_i &lt; s_p$, the relation $S_{\text{data}}(d) &lt; S_{\text{delete}}(f_p)$ holds. Thus, $\Psi_{\text{pos}}(d, i, S_k) = 1$.</li>
+          <li>If a roaring bitmap contains offset $i$ for $d.\text{path}$ written at $s_v \le s_k$, then because $s_i &lt; s_v$, the relation $S_{\text{data}}(d) &lt; S_{\text{delete}}(v_d)$ holds. Thus, $\Psi_{\text{dv}}(d, i, S_k) = 1$.</li>
+          <li>If a row matches an equality delete rule $f_e$ written at $s_e \le s_k$, then because $s_i &lt; s_e$, the relation $S_{\text{data}}(d) &lt; S_{\text{delete}}(f_e)$ holds. Thus, $\Psi_{\text{eq}}(d, i, S_k) = 1$.</li>
+        </ol>
+        Since the composite indicator $\Psi(d, i, S_k) = 1$ if and only if any of the above conditions evaluate to $1$, we have:
+        $$\Psi(d, i, S_k) = 1 \iff \text{MatchesDeletedRules}(\text{Record}_d(i), S_k)$$
+        Therefore:
+        $$\text{ActiveRows}(d, S_k) = \{ \text{Record}_d(i) \mid i \in I_d \land \Psi(d, i, S_k) = 0 \}$$
+        $$\equiv \{ \text{Record}_d(i) \mid i \in I_d \land \neg \text{MatchesDeletedRules}(\text{Record}_d(i), S_k) \} \equiv \text{CoW}(d, S_k) \quad \blacksquare$$
+      </div>
+
+      <h3>📊 Step-by-Step Bitwise Row Resolution Simulation</h3>
+      <p>
+        Let's visually trace how a query engine reads a physical Parquet data file containing 4 rows, matching it against an active snapshot's delete logs:
+      </p>
+      <div class="parity-table-container">
+        <table class="parity-table">
+          <thead>
+            <tr>
+              <th style="text-align: center;">Row Index ($i$)</th>
+              <th>Physical Data Record</th>
+              <th style="text-align: center;">$\Psi_{\text{pos}}$ ($i \in \{1\}$)</th>
+              <th style="text-align: center;">$\Psi_{\text{dv}}$ ($i \in \{2\}$)</th>
+              <th style="text-align: center;">$\Psi_{\text{eq}}$ (dept == 'Sales')</th>
+              <th style="text-align: center;">Indicator $\Psi$</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="text-align: center; font-family: var(--mono);">0</td>
+              <td><code>Row(id=1, name="Alice", dept="HR")</code></td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--olive);">0</td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--olive);">0</td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--olive);">0</td>
+              <td style="text-align: center; font-family: var(--mono); font-weight: 600; color: var(--olive);">0</td>
+              <td><span class="badge supported">Retained</span></td>
+            </tr>
+            <tr>
+              <td style="text-align: center; font-family: var(--mono);">1</td>
+              <td><code>Row(id=2, name="Bob", dept="Sales")</code></td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--clay);">1</td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--olive);">0</td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--clay);">1</td>
+              <td style="text-align: center; font-family: var(--mono); font-weight: 600; color: var(--clay);">1</td>
+              <td><span class="badge unsupported">Dropped</span></td>
+            </tr>
+            <tr>
+              <td style="text-align: center; font-family: var(--mono);">2</td>
+              <td><code>Row(id=3, name="Charlie", dept="Eng")</code></td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--olive);">0</td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--clay);">1</td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--olive);">0</td>
+              <td style="text-align: center; font-family: var(--mono); font-weight: 600; color: var(--clay);">1</td>
+              <td><span class="badge unsupported">Dropped</span></td>
+            </tr>
+            <tr>
+              <td style="text-align: center; font-family: var(--mono);">3</td>
+              <td><code>Row(id=4, name="Diana", dept="HR")</code></td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--olive);">0</td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--olive);">0</td>
+              <td style="text-align: center; font-family: var(--mono); color: var(--olive);">0</td>
+              <td style="text-align: center; font-family: var(--mono); font-weight: 600; color: var(--olive);">0</td>
+              <td><span class="badge supported">Retained</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>

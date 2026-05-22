@@ -1,0 +1,356 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Partition Spec Evolution — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Specification Section II</div>
+      <h1>Partition Spec <em>Evolution</em></h1>
+      <p class="tagline">
+        Understanding partition metadata schemas, historical specs, and the grouping mechanics during table compaction.
+      </p>
+    </header>
+
+    <section id="evolution-overview">
+      <h2>1. Specification Overview</h2>
+      <p>
+        Iceberg support for **partition spec evolution** allows tables to change how data is physically partitioned over time without rewriting historical files. When a table's partition spec is changed, old data files remain partitioned under the original spec, and only newly written files utilize the evolved spec.
+      </p>
+      <p>
+        This results in a single snapshot containing files written under multiple different specs simultaneously. Data files carry their specific <code>spec_id</code>, letting readers dynamically prune them.
+      </p>
+    </section>
+
+    <section id="grouping-invariant">
+      <h2>2. Compaction Planning &amp; Grouping Invariants</h2>
+      <p>
+        When compacting (rewriting) table files, engines must resolve how to group files from old specifications. If old files are rewritten, they must be restructured to fit the current active specification.
+      </p>
+
+      <div class="equation-box">
+        <span class="eq-label">Invariant 1.1: Spec Compatibility Grouping</span>
+        <div class="eq-math">
+          $$G(f) = \begin{cases} 
+            f.\text{partition} &amp; \text{if } f.\text{spec\_id} = Table.\text{default\_spec\_id} \\ 
+            \emptyset &amp; \text{otherwise} 
+          \end{cases}$$
+        </div>
+        <div class="eq-explanation">
+          <strong>The Invariant:</strong> During compaction planning, any file $f$ whose <code>spec_id</code> does not match the active <code>default_spec_id</code> is stripped of its partition value and mapped to the empty record sentinel ($\emptyset$ or <code>emptyStruct</code>). This forces all incompatible old files to be grouped together. The compaction engine will read them in bulk, and the writer will re-partition the entire dataset under the new current specification on write.
+        </div>
+      </div>
+    </section>
+
+    <section id="interactive-planner">
+      <h2>3. Invariant Simulator: Compaction Planning</h2>
+      <p class="sec-desc">
+        Use this live sandbox to generate files under historical <strong>Spec 0</strong>, trigger spec evolution, and execute the <code>groupByPartition()</code> planner. Observe how files are automatically split and re-partitioned.
+      </p>
+
+      <div class="simulator-container">
+        
+        <!-- Left: Sidebar Controls -->
+        <div class="controls-panel">
+          <div class="ctrl-title">Table State</div>
+          <div>
+            <span class="viz-title" style="font-size: 13px; font-weight: bold; display: block; margin-bottom: 4px;">Default Spec ID:</span>
+            <span id="spec-badge" class="state-badge">Spec 0: identity(date)</span>
+          </div>
+
+          <div class="ctrl-title" style="margin-top: 12px;">Generator</div>
+          <button id="btn-add-s0" class="btn">
+            + File (Spec 0)
+          </button>
+          <button id="btn-add-s1" class="btn" disabled>
+            + File (Spec 1)
+          </button>
+          <button id="btn-evolve" class="btn btn-clay">
+            Evolve to Spec 1: month(date)
+          </button>
+
+          <div class="ctrl-title" style="margin-top: 12px;">Engine Action</div>
+          <button id="btn-compact" class="btn btn-clay" style="font-weight: bold;">
+            Run Compaction Planning
+          </button>
+          <button id="btn-reset" class="btn" style="border-color: var(--g500); color: var(--g700);">
+            Reset Sandbox
+          </button>
+        </div>
+
+        <!-- Right: Main Grid / Viz -->
+        <div class="visual-panel">
+          <div class="viz-header">
+            <div class="viz-title">Active Snapshot Files</div>
+            <span id="file-counter" style="font-family: var(--mono); font-size: 11px; color: var(--g500);">3 Files</span>
+          </div>
+
+          <div class="viz-stages">
+            
+            <!-- Ungrouped Files -->
+            <div id="uncomp-section" class="stage-section">
+              <div class="stage-title">
+                <span>All Active Data Files</span>
+                <span>Pending Grouping</span>
+              </div>
+              <div id="uncomp-grid" class="file-grid">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+
+            <!-- Grouped Buckets (Appears during planning) -->
+            <div id="grouped-container" style="display: none; flex-direction: column; gap: 16px;">
+              <div class="stage-title">Mapped Partition Groups (Invariant 1.1)</div>
+              
+              <div id="bucket-homeless" class="stage-section homeless-group">
+                <div class="stage-title">
+                  <span>Incompatible Specs (Mapped to emptyStruct / null)</span>
+                  <span class="mono">partition = [None]</span>
+                </div>
+                <div id="bucket-homeless-grid" class="file-grid"></div>
+              </div>
+
+              <div id="bucket-active" class="stage-section active-group">
+                <div class="stage-title">
+                  <span>Compatible Specs (Grouped by Transform)</span>
+                  <span class="mono" id="active-partition-label">partition = date_month=2026-05</span>
+                </div>
+                <div id="bucket-active-grid" class="file-grid"></div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- System Logs -->
+          <div class="viz-log" id="sim-log">
+            <div class="viz-log-line">System initialized. Sandbox contains initial files written under <em>Spec 0</em>.</div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ── Simulator JavaScript Logic ── -->
+<script>
+  let currentSpecId = 0;
+  let fileCount = 0;
+  let files = [
+    { id: ++fileCount, path: 'data/date=2026-05-15/f1.parquet', specId: 0, partition: '{date: 2026-05-15}', size: '4.2 MB' },
+    { id: ++fileCount, path: 'data/date=2026-05-18/f2.parquet', specId: 0, partition: '{date: 2026-05-18}', size: '3.8 MB' },
+    { id: ++fileCount, path: 'data/date=2026-05-20/f3.parquet', specId: 0, partition: '{date: 2026-05-20}', size: '2.9 MB' }
+  ];
+
+  const uncompGrid = document.getElementById('uncomp-grid');
+  const bucketHomelessGrid = document.getElementById('bucket-homeless-grid');
+  const bucketActiveGrid = document.getElementById('bucket-active-grid');
+  const logContainer = document.getElementById('sim-log');
+  const specBadge = document.getElementById('spec-badge');
+  const fileCounter = document.getElementById('file-counter');
+  
+  const btnAddS0 = document.getElementById('btn-add-s0');
+  const btnAddS1 = document.getElementById('btn-add-s1');
+  const btnEvolve = document.getElementById('btn-evolve');
+  const btnCompact = document.getElementById('btn-compact');
+  const btnReset = document.getElementById('btn-reset');
+  
+  const groupedContainer = document.getElementById('grouped-container');
+  const uncompSection = document.getElementById('uncomp-section');
+
+  function addLog(text, type = '') {
+    const el = document.createElement('div');
+    el.className = `viz-log-line ${type}`;
+    el.innerHTML = text;
+    logContainer.appendChild(el);
+    logContainer.scrollTop = logContainer.scrollHeight;
+  }
+
+  function renderFiles() {
+    uncompGrid.innerHTML = '';
+    fileCounter.textContent = `${files.length} File${files.length !== 1 ? 's' : ''}`;
+    
+    files.forEach(f => {
+      const card = document.createElement('div');
+      card.className = `file-card spec-${f.specId} ${f.compacted ? 'compacted' : ''}`;
+      card.innerHTML = `
+        <div class="card-path" title="${f.path}">${f.path.split('/').pop()}</div>
+        <div class="card-meta">Spec: ${f.specId} // Size: ${f.size}</div>
+        <div class="card-part">${f.partition}</div>
+      `;
+      uncompGrid.appendChild(card);
+    });
+  }
+
+  // Initial render
+  renderFiles();
+
+  // Button Listeners
+  btnAddS0.addEventListener('click', () => {
+    const day = 15 + Math.floor(Math.random() * 15);
+    const newFile = {
+      id: ++fileCount,
+      path: `data/date=2026-05-${day}/gen_${fileCount}.parquet`,
+      specId: 0,
+      partition: `{date: 2026-05-${day}}`,
+      size: `${(2 + Math.random() * 5).toFixed(1)} MB`
+    };
+    files.push(newFile);
+    addLog(`Generated file <em>${newFile.path.split('/').pop()}</em> under historical <em>Spec 0</em>.`);
+    renderFiles();
+  });
+
+  btnAddS1.addEventListener('click', () => {
+    const newFile = {
+      id: ++fileCount,
+      path: `data/date_month=2026-05/gen_${fileCount}.parquet`,
+      specId: 1,
+      partition: '{date_month: 2026-05}',
+      size: `${(2 + Math.random() * 5).toFixed(1)} MB`
+    };
+    files.push(newFile);
+    addLog(`Generated file <em>${newFile.path.split('/').pop()}</em> under active <em>Spec 1</em>.`);
+    renderFiles();
+  });
+
+  btnEvolve.addEventListener('click', () => {
+    currentSpecId = 1;
+    specBadge.textContent = 'Spec 1: month(date)';
+    specBadge.classList.add('evolved');
+    btnAddS0.disabled = true;
+    btnAddS1.disabled = false;
+    btnEvolve.disabled = true;
+    addLog('Evolved partition specification to <em>Spec 1: month(date)</em>. New files will use monthly partitioning.', 'success');
+  });
+
+  btnCompact.addEventListener('click', () => {
+    if (files.length === 0) {
+      addLog('No files to compact.', 'error');
+      return;
+    }
+
+    addLog('Executing <em>groupByPartition()</em> based on Invariant 1.1...', 'success');
+    btnCompact.disabled = true;
+    btnAddS0.disabled = true;
+    btnAddS1.disabled = true;
+
+    // Transition Visuals to Grouped Buckets
+    uncompSection.style.display = 'none';
+    groupedContainer.style.display = 'flex';
+    bucketHomelessGrid.innerHTML = '';
+    bucketActiveGrid.innerHTML = '';
+
+    let spec0Count = 0;
+    let spec1Count = 0;
+
+    files.forEach(f => {
+      const card = document.createElement('div');
+      card.className = `file-card spec-${f.specId}`;
+      card.innerHTML = `
+        <div class="card-path">${f.path.split('/').pop()}</div>
+        <div class="card-meta">Spec: ${f.specId} // Size: ${f.size}</div>
+        <div class="card-part">${f.partition}</div>
+      `;
+
+      if (f.specId === currentSpecId) {
+        bucketActiveGrid.appendChild(card);
+        spec1Count++;
+      } else {
+        bucketHomelessGrid.appendChild(card);
+        spec0Count++;
+      }
+    });
+
+    addLog(`Grouped <em>${spec0Count}</em> old spec files (incompatible) under <em>emptyStruct</em> (None).`);
+    addLog(`Grouped <em>${spec1Count}</em> active spec files under compatible partition bucket.`);
+
+    // Delay writing phase to simulate engine processing
+    setTimeout(() => {
+      addLog('Rewriting file groups and committing updates...', 'success');
+      
+      setTimeout(() => {
+        // Clear groups and output compacted files
+        groupedContainer.style.display = 'none';
+        uncompSection.style.display = 'block';
+
+        let newFiles = [];
+        if (spec0Count > 0) {
+          newFiles.push({
+            id: ++fileCount,
+            path: 'data/date_month=2026-05/compacted_migrated.parquet',
+            specId: 1,
+            partition: '{date_month: 2026-05}',
+            size: '9.8 MB',
+            compacted: true
+          });
+          addLog('Written 1 new migrated file under <em>Spec 1</em> covering all January/May records from incompatible specs.', 'success');
+        }
+
+        if (spec1Count > 0) {
+          newFiles.push({
+            id: ++fileCount,
+            path: 'data/date_month=2026-05/compacted_active.parquet',
+            specId: 1,
+            partition: '{date_month: 2026-05}',
+            size: '8.4 MB',
+            compacted: true
+          });
+          addLog('Compacted compatible files under partition <em>2026-05</em> into a single active file.', 'success');
+        }
+
+        files = newFiles;
+        renderFiles();
+        
+        btnReset.disabled = false;
+        addLog('Compaction transaction committed atomically. Old files deleted from active snapshot.', 'success');
+      }, 1500);
+
+    }, 2000);
+  });
+
+  btnReset.addEventListener('click', () => {
+    currentSpecId = 0;
+    fileCount = 3;
+    files = [
+      { id: 1, path: 'data/date=2026-05-15/f1.parquet', specId: 0, partition: '{date: 2026-05-15}', size: '4.2 MB' },
+      { id: 2, path: 'data/date=2026-05-18/f2.parquet', specId: 0, partition: '{date: 2026-05-18}', size: '3.8 MB' },
+      { id: 3, path: 'data/date=2026-05-20/f3.parquet', specId: 0, partition: '{date: 2026-05-20}', size: '2.9 MB' }
+    ];
+
+    specBadge.textContent = 'Spec 0: identity(date)';
+    specBadge.classList.remove('evolved');
+    
+    btnAddS0.disabled = false;
+    btnAddS1.disabled = true;
+    btnEvolve.disabled = false;
+    btnCompact.disabled = false;
+
+    uncompSection.style.display = 'block';
+    groupedContainer.style.display = 'none';
+
+    logContainer.innerHTML = '';
+    addLog('Sandbox reset. System re-initialized with 3 Spec 0 files.');
+    renderFiles();
+  });
+</script>
+</body>
+</html>
