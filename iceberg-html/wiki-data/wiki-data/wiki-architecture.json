@@ -169,7 +169,8 @@
         "3285",
         "1880",
         "2143",
-        "1661"
+        "1661",
+        "2822"
       ],
       "metadata": {
         "1661": {
@@ -188,6 +189,16 @@
           "customDependsOn": [
             "3124"
           ],
+          "customTasks": [],
+          "taskStates": {}
+        },
+        "2822": {
+          "layer": "Catalog Operations",
+          "status": "complete",
+          "customDependsOn": [
+            "3285"
+          ],
+          "ignoredDependsOn": [],
           "customTasks": [],
           "taskStates": {}
         },

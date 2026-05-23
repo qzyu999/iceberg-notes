@@ -11,6 +11,14 @@
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
 <script src="wiki.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    if (typeof mermaid !== "undefined") {
+      mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+    }
+  });
+</script>
 <style>
   /* Interactive Network DAG Graph custom aesthetics */
   .dag-node-group circle {
@@ -30,6 +38,66 @@
   .dag-node-group:hover text {
     font-size: 11.5px !important;
     font-weight: 800 !important;
+  }
+  /* Fullscreen Mermaid Diagram modal overlay styling */
+  .mermaid-fullscreen-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(250, 249, 245, 0.97);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    box-sizing: border-box;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .mermaid-fullscreen-overlay.open {
+    display: flex;
+  }
+  .mermaid-fullscreen-content {
+    max-width: 95%;
+    max-height: 85%;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: auto;
+  }
+  .mermaid-fullscreen-content svg {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    filter: drop-shadow(0 4px 20px rgba(0,0,0,0.03));
+  }
+  .mermaid-fullscreen-close {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1.5px solid var(--g300);
+    background: var(--paper);
+    color: var(--slate);
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    outline: none;
+  }
+  .mermaid-fullscreen-close:hover {
+    border-color: var(--clay);
+    color: var(--clay);
+    transform: scale(1.05);
   }
 </style>
 </head>
@@ -253,17 +321,26 @@
 
         <!-- Section: Shareable Proposal Markdown Compiler -->
         <div class="matrix-detail-pane" style="margin-top: 24px;">
-          <div class="arch-task-header" style="border-bottom: none; padding-bottom: 0;">
+          <div class="arch-task-header" style="border-bottom: none; padding-bottom: 0; display: flex; justify-content: space-between; align-items: center;">
             <div class="eyebrow" style="margin-bottom: 0;">Shareable Integration Proposal</div>
-            <button class="copy-proposal-btn" id="btn-copy-proposal" onclick="copyMarkdownProposal()">
-              📋 Copy Shareable Plan
-            </button>
+            <div style="display: flex; gap: 8px;">
+              <button class="copy-proposal-btn" id="btn-expand-visual" style="display: none; background: transparent; border-color: var(--slate); color: var(--slate); padding: 0 10px;" onclick="expandVisualProposal()">
+                🔍 Expand Diagram
+              </button>
+              <button class="copy-proposal-btn" id="btn-toggle-visual" style="background: transparent; border-color: var(--slate); color: var(--slate); padding: 0 10px;" onclick="toggleVisualProposal()">
+                🎨 View Visual Diagram
+              </button>
+              <button class="copy-proposal-btn" id="btn-copy-proposal" onclick="copyMarkdownProposal()">
+                📋 Copy Shareable Plan
+              </button>
+            </div>
           </div>
           <p style="font-size: 11.5px; color: var(--g500); margin: 0;">
             Compiles the dynamic reference DAG, subsystem targets, and checklist metrics into a shareable markdown template.
           </p>
           <div class="mermaid-export-box">
             <pre class="mermaid-code-preview" id="proposal-preview-area"><!-- Compiled proposal --></pre>
+            <div id="proposal-visual-area" style="display: none; background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 20px; overflow-x: auto; margin-top: 10px;"></div>
           </div>
         </div>
       </div>
@@ -1405,6 +1482,11 @@ ${detailsList}
 `;
 
     preview.textContent = fullProposalText;
+
+    const visualBox = document.getElementById("proposal-visual-area");
+    if (visualBox && visualBox.style.display === "block") {
+      renderVisualMermaid();
+    }
   }
 
   function copyMarkdownProposal() {
@@ -1423,6 +1505,98 @@ ${detailsList}
       console.error("Clipboard copy failed:", err);
       alert("Failed to copy markdown. Please select the text inside the code preview and copy it manually.");
     });
+  }
+
+  async function toggleVisualProposal() {
+    const visualBox = document.getElementById("proposal-visual-area");
+    const previewBox = document.getElementById("proposal-preview-area");
+    const toggleBtn = document.getElementById("btn-toggle-visual");
+    const expandBtn = document.getElementById("btn-expand-visual");
+
+    const isVisual = visualBox.style.display === "block";
+
+    if (isVisual) {
+      visualBox.style.display = "none";
+      previewBox.style.display = "block";
+      toggleBtn.textContent = "🎨 View Visual Diagram";
+      if (expandBtn) expandBtn.style.display = "none";
+    } else {
+      visualBox.style.display = "block";
+      previewBox.style.display = "none";
+      toggleBtn.textContent = "💻 View Raw Markdown";
+      if (expandBtn) expandBtn.style.display = "inline-block";
+      renderVisualMermaid();
+    }
+  }
+
+  function renderVisualMermaid() {
+    const container = document.getElementById("proposal-visual-area");
+    if (!container) return;
+
+    if (plannerNodes.length === 0) {
+      container.textContent = "No architectural roadmap components registered in this plan.";
+      return;
+    }
+
+    let mermaidGraph = "flowchart TD\n";
+    let hasLinks = false;
+
+    plannerNodes.forEach(node => {
+      const activeIdClean = `issue_${node.id}`;
+      const statusIcon = node.status === "complete" ? "🟢" : (node.status === "in-progress" ? "🟡" : "🔵");
+      
+      mermaidGraph += `    ${activeIdClean}["#${node.id}: ${node.title.replace(/"/g, "'")} (${node.status.toUpperCase()})"]\n`;
+      
+      (node.dependsOn || []).forEach(depId => {
+        const depClean = `issue_${depId}`;
+        mermaidGraph += `    ${depClean} --> ${activeIdClean}\n`;
+        hasLinks = true;
+      });
+    });
+
+    if (!hasLinks) {
+      mermaidGraph += "    %% No explicit references or prerequisite links detected\n";
+    }
+
+    container.innerHTML = `<div class="mermaid">${mermaidGraph}</div>`;
+
+    try {
+      if (typeof mermaid !== "undefined") {
+        mermaid.init(undefined, container.querySelectorAll(".mermaid"));
+      } else {
+        container.innerHTML = `<div style="color: var(--g500); font-size: 11.5px; padding: 12px; font-style: italic;">Mermaid library not loaded yet. Click copy to copy code.</div>`;
+      }
+    } catch (err) {
+      console.error("Mermaid rendering failed:", err);
+      container.innerHTML = `<div style="color: var(--clay); font-size: 11.5px; padding: 12px; font-style: italic;">Failed to compile Mermaid diagram.</div>`;
+    }
+  }
+
+  function expandVisualProposal() {
+    const modal = document.getElementById("mermaid-fullscreen-modal");
+    const viewport = document.getElementById("mermaid-fullscreen-viewport");
+    const title = document.getElementById("mermaid-fullscreen-title");
+
+    const activePlan = archDatabase.savedPlans[archDatabase.activePlanId] || { name: "Architectural Proposal" };
+    if (title) title.textContent = `Integration Flowchart: ${activePlan.name}`;
+
+    const svgSource = document.querySelector("#proposal-visual-area svg");
+    if (svgSource && viewport && modal) {
+      viewport.innerHTML = "";
+      const clonedSvg = svgSource.cloneNode(true);
+      clonedSvg.removeAttribute("height");
+      viewport.appendChild(clonedSvg);
+      modal.classList.add("open");
+    } else {
+      alert("No visual diagram rendered to expand.");
+    }
+  }
+
+  function closeFullscreenMermaid() {
+    const modal = document.getElementById("mermaid-fullscreen-modal");
+    if (modal) modal.classList.remove("open");
+    const viewport = document.getElementById("mermaid-fullscreen-viewport");
+    if (viewport) viewport.innerHTML = "";
   }
 
   // 7. Modal Drawer overlay controls
@@ -1699,5 +1873,11 @@ ${detailsList}
     }
   }
 </script>
+  <!-- Fullscreen Mermaid Diagram Overlay -->
+  <div id="mermaid-fullscreen-modal" class="mermaid-fullscreen-overlay">
+    <button class="mermaid-fullscreen-close" onclick="closeFullscreenMermaid()">×</button>
+    <div style="font-family: var(--serif); font-size: 20px; color: var(--slate); margin-bottom: 24px; font-weight: 500;" id="mermaid-fullscreen-title">Integration Flowchart</div>
+    <div id="mermaid-fullscreen-viewport" class="mermaid-fullscreen-content"></div>
+  </div>
 </body>
 </html>
