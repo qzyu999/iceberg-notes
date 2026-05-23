@@ -922,7 +922,8 @@
         fx: existing ? existing.fx : null,
         fy: existing ? existing.fy : null,
         vx: 0,
-        vy: 0
+        vy: 0,
+        depth: 0 // Topological/longest-path horizontal depth level
       };
       idMap.set(item.id, node);
       return node;
@@ -941,6 +942,18 @@
         }
       });
     });
+
+    // Propagate depths to compute topological layout rankings
+    for (let iter = 0; iter < 10; iter++) {
+      let changed = false;
+      simulationLinks.forEach(link => {
+        if (link.target.depth < link.source.depth + 1) {
+          link.target.depth = link.source.depth + 1;
+          changed = true;
+        }
+      });
+      if (!changed) break;
+    }
 
     isSimulating = true;
     tickSimulation();
@@ -1001,16 +1014,28 @@
       if (nodeB.fx === null) { nodeB.vx -= fx; nodeB.vy -= fy; }
     });
 
-    // 3. Central gravity keeps the entire group centered
-    const kGravity = 0.02;
-    const centerX = width / 2;
+    // 3. Directed horizontal layering force and vertical centering gravity
+    let maxDepth = 0;
+    simulationNodes.forEach(node => {
+      if (node.depth > maxDepth) maxDepth = node.depth;
+    });
+
+    const kLayering = 0.08;
+    const kGravityY = 0.04;
     const centerY = height / 2;
+    const hMargin = 80;
+
     simulationNodes.forEach(node => {
       if (node.fx === null) {
-        const dx = centerX - node.x;
+        // Pull towards topological depth rank column
+        const targetX = maxDepth > 0
+          ? hMargin + (node.depth / maxDepth) * (width - 2 * hMargin)
+          : width / 2;
+        node.vx += (targetX - node.x) * kLayering;
+
+        // Pull towards vertical center
         const dy = centerY - node.y;
-        node.vx += dx * kGravity;
-        node.vy += dy * kGravity;
+        node.vy += dy * kGravityY;
       }
     });
 
