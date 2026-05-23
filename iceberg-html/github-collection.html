@@ -5,6 +5,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GitHub PR &amp; Issue Explorer — Iceberg Cookbook</title>
   <link rel="stylesheet" href="wiki.css">
+  <style>
+    .github-table-wrapper {
+      max-height: 440px;
+      overflow-y: auto;
+      border: 1.5px solid var(--g300);
+      border-radius: 12px;
+      background: var(--paper);
+      box-shadow: 0 4px 12px rgba(20,20,19,0.02);
+      margin-bottom: 24px;
+    }
+    .github-table-wrapper table {
+      margin: 0;
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .github-table-wrapper th {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--paper);
+      border-bottom: 2px solid var(--slate) !important;
+    }
+  </style>
 </head>
 <body>
   <div class="wiki-layout">
@@ -140,6 +163,10 @@
                 <option value="open">🟢 Open</option>
                 <option value="closed">🔴 Closed</option>
                 <option value="merged">🟣 Merged</option>
+              </select>
+              <select id="filter-layout" class="filter-select" style="border-color: var(--clay); color: var(--clay); font-weight: 600;" onchange="renderBoard()">
+                <option value="grid">📊 Grid View</option>
+                <option value="table">📋 Table View</option>
               </select>
               <select id="filter-binding" class="filter-select" onchange="renderBoard()">
                 <option value="all">All Bindings</option>
@@ -901,6 +928,7 @@
       const typeFilter = document.getElementById("filter-type").value;
       const stateFilter = document.getElementById("filter-state").value;
       const bindingFilter = document.getElementById("filter-binding").value;
+      const layout = document.getElementById("filter-layout").value;
 
       let filtered = ghDatabase;
 
@@ -934,32 +962,74 @@
         return;
       }
 
-      grid.innerHTML = filtered.map(item => {
-        const { stateClass, stateLabel } = getStatusBadgeDetails(item);
-        const bindingVal = item.binding || "core";
-
-        const isSelected = String(item.number) === selectedNumber;
-
-        return `
-          <div class="gh-card ${isSelected ? 'selected' : ''}" data-number="${item.number}" onclick="selectResource('${item.number}')">
-            <div class="gh-card-header">
-              <div class="gh-card-meta">
-                <span class="badge-type ${item.type}">${item.type}</span>
-                <span class="badge-binding ${bindingVal}">${bindingVal}</span>
-                <span class="gh-card-number">#${item.number}</span>
-              </div>
-              <span class="badge-status ${stateClass}" style="font-size: 9px; padding: 1px 6px;">${stateLabel}</span>
-            </div>
-            <h4 class="gh-card-title">${item.title}</h4>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: auto; font-size: 11px; color: var(--g500); font-family: var(--mono);">
-              <span>@${item.author}</span>
-              <span style="font-weight: bold; color: var(--clay); display: flex; align-items: center; gap: 4px;">
-                ${item.outgoing.length + item.incoming.length > 0 ? `🔗 ${item.outgoing.length + item.incoming.length} refs` : ''}
-              </span>
-            </div>
+      if (layout === "table") {
+        grid.className = ""; // Drop grid flex layout
+        grid.innerHTML = `
+          <div class="github-table-wrapper">
+            <table class="matrix-table">
+              <thead>
+                <tr>
+                  <th style="width: 10%;">ID</th>
+                  <th style="width: 12%;">Type</th>
+                  <th style="width: 48%;">Title</th>
+                  <th style="width: 10%; text-align: center;">Binding</th>
+                  <th style="width: 12%; text-align: center;">Status</th>
+                  <th style="width: 8%; text-align: center;">Refs</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filtered.map(item => {
+                  const { stateClass, stateLabel } = getStatusBadgeDetails(item);
+                  const bindingVal = item.binding || "core";
+                  const isSelected = String(item.number) === selectedNumber;
+                  return `
+                    <tr class="${isSelected ? 'active-row' : ''}" style="cursor: pointer;" onclick="selectResource('${item.number}')">
+                      <td style="font-family: var(--mono); font-weight: bold; color: var(--slate); font-size: 12px;">#${item.number}</td>
+                      <td><span class="badge-type ${item.type}" style="font-size: 9px; padding: 1px 4px;">${item.type.toUpperCase()}</span></td>
+                      <td style="font-weight: 600; color: var(--slate);">
+                        ${item.title}
+                        <span style="font-weight: normal; font-size: 11px; color: var(--g500); margin-left: 6px;">@${item.author}</span>
+                      </td>
+                      <td style="text-align: center;"><span class="badge-binding ${bindingVal}" style="font-size: 9px; padding: 1px 4px;">${bindingVal}</span></td>
+                      <td style="text-align: center;"><span class="badge-status ${stateClass}" style="font-size: 9px; padding: 1px 6px;">${stateLabel}</span></td>
+                      <td style="text-align: center; font-weight: bold; color: var(--clay); font-size: 11px;">
+                        ${item.outgoing.length + item.incoming.length > 0 ? `🔗 ${item.outgoing.length + item.incoming.length}` : '—'}
+                      </td>
+                    </tr>
+                  `;
+                }).join("")}
+              </tbody>
+            </table>
           </div>
         `;
-      }).join("");
+      } else {
+        grid.className = "github-grid"; // Restore standard grid layout
+        grid.innerHTML = filtered.map(item => {
+          const { stateClass, stateLabel } = getStatusBadgeDetails(item);
+          const bindingVal = item.binding || "core";
+          const isSelected = String(item.number) === selectedNumber;
+
+          return `
+            <div class="gh-card ${isSelected ? 'selected' : ''}" data-number="${item.number}" onclick="selectResource('${item.number}')">
+              <div class="gh-card-header">
+                <div class="gh-card-meta">
+                  <span class="badge-type ${item.type}">${item.type}</span>
+                  <span class="badge-binding ${bindingVal}">${bindingVal}</span>
+                  <span class="gh-card-number">#${item.number}</span>
+                </div>
+                <span class="badge-status ${stateClass}" style="font-size: 9px; padding: 1px 6px;">${stateLabel}</span>
+              </div>
+              <h4 class="gh-card-title">${item.title}</h4>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: auto; font-size: 11px; color: var(--g500); font-family: var(--mono);">
+                <span>@${item.author}</span>
+                <span style="font-weight: bold; color: var(--clay); display: flex; align-items: center; gap: 4px;">
+                  ${item.outgoing.length + item.incoming.length > 0 ? `🔗 ${item.outgoing.length + item.incoming.length} refs` : ''}
+                </span>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
 
       // Confirm detailed panel is active for the selected node
       const activeObj = filtered.find(item => item.number === selectedNumber);
