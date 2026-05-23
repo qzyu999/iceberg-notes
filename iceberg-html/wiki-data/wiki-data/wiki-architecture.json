@@ -1,102 +1,177 @@
-[
-  {
-    "id": "snapshot-isolation",
-    "title": "Metadata Snapshot Isolation",
-    "layer": "Transactions",
-    "binding": "core",
-    "status": "complete",
-    "desc": "Establishes base table metadata swap isolation boundaries, tracking snapshot lists and transaction state swaps atomically.",
-    "dependsOn": [],
-    "tasks": [
-      {
-        "id": "task-base-1",
-        "text": "Design manifest-list structural schema spec",
-        "completed": true
-      },
-      {
-        "id": "task-base-2",
-        "text": "Implement serializable check-and-put swap metastore validation",
-        "completed": true
+{
+  "savedPlans": {
+    "full-collection": {
+      "name": "Full Collection Roadmap",
+      "nodes": [
+        "3364",
+        "3361",
+        "3320",
+        "3319",
+        "3285",
+        "3270",
+        "3131",
+        "3130",
+        "3129",
+        "3124",
+        "3118",
+        "3049",
+        "2943",
+        "2822",
+        "2634",
+        "2261",
+        "2159",
+        "2143",
+        "2142",
+        "2050",
+        "1958",
+        "1938",
+        "1935",
+        "1931",
+        "1930",
+        "1929",
+        "1928",
+        "1880",
+        "1818",
+        "1808",
+        "1751",
+        "1661",
+        "1607",
+        "1549",
+        "1516",
+        "1200",
+        "1199",
+        "1092",
+        "1078",
+        "1065",
+        "819",
+        "736",
+        "516",
+        "270",
+        "240",
+        "31"
+      ],
+      "metadata": {
+        "0": {
+          "id": "snapshot-isolation",
+          "title": "Metadata Snapshot Isolation",
+          "layer": "Transactions",
+          "binding": "core",
+          "status": "complete",
+          "desc": "Establishes base table metadata swap isolation boundaries, tracking snapshot lists and transaction state swaps atomically.",
+          "dependsOn": [],
+          "tasks": [
+            {
+              "id": "task-base-1",
+              "text": "Design manifest-list structural schema spec",
+              "completed": true
+            },
+            {
+              "id": "task-base-2",
+              "text": "Implement serializable check-and-put swap metastore validation",
+              "completed": true
+            }
+          ]
+        },
+        "1": {
+          "id": "retry-commit",
+          "title": "Retry Commit Hook",
+          "layer": "Catalog Operations",
+          "binding": "java",
+          "status": "in-progress",
+          "desc": "Implements dynamic commit-retry logic pushed in by Iceberg, allowing transactional retries when conflicts occur during catalog metadata swaps.",
+          "dependsOn": [
+            "snapshot-isolation"
+          ],
+          "tasks": [
+            {
+              "id": "task-retry-1",
+              "text": "Implement conflict-checking state machine",
+              "completed": true
+            },
+            {
+              "id": "task-retry-2",
+              "text": "Support transactional retry policies and exponential backoffs",
+              "completed": false
+            },
+            {
+              "id": "task-retry-3",
+              "text": "Write transactional metastore conflict resolver unit tests",
+              "completed": false
+            }
+          ]
+        },
+        "2": {
+          "id": "replace-api",
+          "title": "Atomic Replace API",
+          "layer": "Planning & Scans",
+          "binding": "java",
+          "status": "planned",
+          "desc": "Exposes powerful, atomic replace endpoints inside transaction boundaries to replace file pointers or schemas atomically.",
+          "dependsOn": [
+            "retry-commit"
+          ],
+          "tasks": [
+            {
+              "id": "task-replace-1",
+              "text": "Expose atomic replace API interface methods",
+              "completed": false
+            },
+            {
+              "id": "task-replace-2",
+              "text": "Integrate catalog check-and-put swap payload generation",
+              "completed": false
+            }
+          ]
+        },
+        "3": {
+          "id": "compaction-rewrite",
+          "title": "Layout Compaction & Rewrite",
+          "layer": "Maintenance & GC",
+          "binding": "core",
+          "status": "planned",
+          "desc": "Dynamic background compactor that merges small data and deletes files. Integrates with the Replace API to swap layout metadata atomically.",
+          "dependsOn": [
+            "replace-api"
+          ],
+          "tasks": [
+            {
+              "id": "task-compact-1",
+              "text": "Code file layout compactors and partition bin-pack merges",
+              "completed": false
+            },
+            {
+              "id": "task-compact-2",
+              "text": "Enforce delete file sequence number integrity checks during rewrites",
+              "completed": false
+            },
+            {
+              "id": "task-compact-3",
+              "text": "Trigger orphan file garbage collection scans upon rewrite swaps",
+              "completed": false
+            }
+          ]
+        }
       }
-    ]
+    },
+    "plan-1779509761391": {
+      "name": "PyIceberg Maintenance",
+      "nodes": [
+        "3320",
+        "3131",
+        "3130"
+      ],
+      "metadata": {
+        "3131": {
+          "layer": "Row-Level Ops",
+          "status": "planned",
+          "customDependsOn": [
+            "3320"
+          ],
+          "customTasks": [],
+          "taskStates": {}
+        }
+      }
+    }
   },
-  {
-    "id": "retry-commit",
-    "title": "Retry Commit Hook",
-    "layer": "Catalog Operations",
-    "binding": "java",
-    "status": "in-progress",
-    "desc": "Implements dynamic commit-retry logic pushed in by Iceberg, allowing transactional retries when conflicts occur during catalog metadata swaps.",
-    "dependsOn": [
-      "snapshot-isolation"
-    ],
-    "tasks": [
-      {
-        "id": "task-retry-1",
-        "text": "Implement conflict-checking state machine",
-        "completed": true
-      },
-      {
-        "id": "task-retry-2",
-        "text": "Support transactional retry policies and exponential backoffs",
-        "completed": false
-      },
-      {
-        "id": "task-retry-3",
-        "text": "Write transactional metastore conflict resolver unit tests",
-        "completed": false
-      }
-    ]
-  },
-  {
-    "id": "replace-api",
-    "title": "Atomic Replace API",
-    "layer": "Planning & Scans",
-    "binding": "java",
-    "status": "planned",
-    "desc": "Exposes powerful, atomic replace endpoints inside transaction boundaries to replace file pointers or schemas atomically.",
-    "dependsOn": [
-      "retry-commit"
-    ],
-    "tasks": [
-      {
-        "id": "task-replace-1",
-        "text": "Expose atomic replace API interface methods",
-        "completed": false
-      },
-      {
-        "id": "task-replace-2",
-        "text": "Integrate catalog check-and-put swap payload generation",
-        "completed": false
-      }
-    ]
-  },
-  {
-    "id": "compaction-rewrite",
-    "title": "Layout Compaction & Rewrite",
-    "layer": "Maintenance & GC",
-    "binding": "core",
-    "status": "planned",
-    "desc": "Dynamic background compactor that merges small data and deletes files. Integrates with the Replace API to swap layout metadata atomically.",
-    "dependsOn": [
-      "replace-api"
-    ],
-    "tasks": [
-      {
-        "id": "task-compact-1",
-        "text": "Code file layout compactors and partition bin-pack merges",
-        "completed": false
-      },
-      {
-        "id": "task-compact-2",
-        "text": "Enforce delete file sequence number integrity checks during rewrites",
-        "completed": false
-      },
-      {
-        "id": "task-compact-3",
-        "text": "Trigger orphan file garbage collection scans upon rewrite swaps",
-        "completed": false
-      }
-    ]
-  }
-]
+  "activePlanId": "plan-1779509761391"
+}

@@ -112,51 +112,79 @@
       </div>
     </div>
 
-    <!-- Search & Filter Controls -->
-    <div class="matrix-controls">
-      <div class="matrix-search-bar">
-        <input type="text" id="arch-search" class="matrix-search-input" placeholder="Search roadmap nodes or titles..." oninput="renderPlanner()">
-        
-        <select id="filter-layer" class="matrix-filter-select" onchange="renderPlanner()">
-          <option value="all">All Layers</option>
-          <option value="Catalog Operations">Catalog Operations</option>
-          <option value="Planning & Scans">Planning & Scans</option>
-          <option value="Row-Level Ops">Row-Level Ops</option>
-          <option value="Transactions">Transactions</option>
-          <option value="Maintenance & GC">Maintenance & GC</option>
-        </select>
+    <!-- Search & Filter Controls Panel -->
+    <div class="matrix-controls" style="display: flex; flex-direction: column; gap: 16px; align-items: stretch; border: 1.5px solid var(--g300); border-radius: 12px; padding: 16px; background: var(--paper); box-shadow: 0 2px 8px rgba(0,0,0,0.01);">
+      
+      <!-- Row 1: Plan Management & Dynamic Node Adder -->
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid var(--g200); padding-bottom: 12px;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span style="font-size: 11px; font-weight: 800; color: var(--slate); font-family: var(--sans); letter-spacing: 0.05em;">PLAN WORKSPACE:</span>
+          <select id="select-active-plan" class="matrix-filter-select" style="border-color: var(--clay); color: var(--clay); font-weight: 600; min-width: 180px; height: 32px;" onchange="switchActivePlan(this.value)">
+            <!-- Dynamically populated -->
+          </select>
+          <button class="btn" style="padding: 0 10px; height: 32px; font-size: 11.5px; background: transparent; border-color: var(--slate); color: var(--slate);" onclick="createNewPlan()">
+            ➕ Create Plan
+          </button>
+          <button class="btn" id="btn-delete-plan" style="padding: 0 10px; height: 32px; font-size: 11.5px; background: transparent; border-color: var(--clay); color: var(--clay);" onclick="deleteActivePlan()">
+            🗑️ Delete Plan
+          </button>
+        </div>
 
-        <select id="filter-binding" class="matrix-filter-select" onchange="renderPlanner()">
-          <option value="all">All Bindings</option>
-          <option value="core">Core Spec</option>
-          <option value="java">Java</option>
-          <option value="python">Python</option>
-          <option value="rust">Rust</option>
-          <option value="go">Go</option>
-          <option value="cpp">C++</option>
-        </select>
-
-        <select id="filter-status" class="matrix-filter-select" onchange="renderPlanner()">
-          <option value="all">All Statuses</option>
-          <option value="complete">🟢 Complete</option>
-          <option value="in-progress">🟡 In Progress</option>
-          <option value="planned">🔵 Planned</option>
-          <option value="blocked">🔴 Blocked</option>
-        </select>
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" id="node-adder-container">
+          <span style="font-size: 11px; font-weight: 800; color: var(--slate); font-family: var(--sans); letter-spacing: 0.05em;">➕ ADD ISSUE/PR:</span>
+          <select id="add-node-select" class="matrix-filter-select" style="min-width: 220px; font-size: 11px; height: 32px;">
+            <!-- Populated dynamically -->
+          </select>
+          <button class="btn btn-clay" style="padding: 0 12px; height: 32px; font-size: 11.5px;" onclick="addNodeToActivePlan()">
+            Add to DAG
+          </button>
+        </div>
       </div>
 
-      <div style="display: flex; gap: 8px;">
-        <button class="btn btn-clay" onclick="openDrawer()">
-          ➕ Link Custom Component
-        </button>
-        <button class="btn" style="background: transparent; border-color: var(--slate); color: var(--slate);" onclick="resetToGitHubSample()">
-          🔄 Reset Planner Sandbox
-        </button>
+      <!-- Row 2: Search & Filter Parameters -->
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div class="matrix-search-bar" style="margin: 0; flex: 1; display: flex; gap: 8px; flex-wrap: wrap;">
+          <input type="text" id="arch-search" class="matrix-search-input" style="flex: 1; height: 32px;" placeholder="Search roadmap nodes or titles..." oninput="renderPlanner()">
+          
+          <select id="filter-layer" class="matrix-filter-select" style="height: 32px;" onchange="renderPlanner()">
+            <option value="all">All Layers</option>
+            <option value="Catalog Operations">Catalog Operations</option>
+            <option value="Planning & Scans">Planning & Scans</option>
+            <option value="Row-Level Ops">Row-Level Ops</option>
+            <option value="Transactions">Transactions</option>
+            <option value="Maintenance & GC">Maintenance & GC</option>
+          </select>
+
+          <select id="filter-binding" class="matrix-filter-select" style="height: 32px;" onchange="renderPlanner()">
+            <option value="all">All Bindings</option>
+            <option value="core">Core Spec</option>
+            <option value="java">Java</option>
+            <option value="python">Python</option>
+            <option value="rust">Rust</option>
+            <option value="go">Go</option>
+            <option value="cpp">C++</option>
+          </select>
+
+          <select id="filter-status" class="matrix-filter-select" style="height: 32px;" onchange="renderPlanner()">
+            <option value="all">All Statuses</option>
+            <option value="complete">🟢 Complete</option>
+            <option value="in-progress">🟡 In Progress</option>
+            <option value="planned">🔵 Planned</option>
+            <option value="blocked">🔴 Blocked</option>
+          </select>
+        </div>
+
+        <div>
+          <button class="btn" style="background: transparent; border-color: var(--slate); color: var(--slate); padding: 0 12px; height: 32px; font-size: 11.5px;" onclick="resetToGitHubSample()">
+            🔄 Reset Planner Sandbox
+          </button>
+        </div>
       </div>
+
     </div>
 
     <!-- Main Workspace Split Pane -->
-    <div class="arch-planner-workspace">
+    <div class="arch-planner-workspace" style="margin-top: 24px;">
       
       <!-- Left Column: Component Catalog List -->
       <div>
@@ -258,7 +286,7 @@
 <script>
   // ── Unified Architecture Planning Databases State ──
   let ghDatabase = [];      // Issues/PRs loaded from wiki-github-collection.json
-  let archDatabase = {};    // Custom planning overlays (layer, status, customDependsOn, customTasks, taskStates)
+  let archDatabase = {};    // Saved custom plans and overlay metadata
   let plannerNodes = [];    // Merged roadmap nodes list
   let selectedNodeId = null; // Issue/PR number of focused node
 
@@ -369,7 +397,10 @@
     }
     archDatabase = loadedArch || {};
 
-    // C. Compile and merge databases
+    // C. Perform dynamic DB schema migration & alignment
+    alignPlannerDatabaseSchema();
+
+    // D. Compile and merge active plan nodes
     compilePlannerNodes();
     
     // Set default focused selection
@@ -382,76 +413,118 @@
     }
 
     renderPlanner();
+    updatePlanToolbarControls();
+  }
+
+  // Ensures archDatabase contains the savedPlans schema and handles legacy migration cleanly
+  function alignPlannerDatabaseSchema() {
+    if (!archDatabase.savedPlans) {
+      // Gather any legacy overlays mapped directly under integer keys
+      const legacyMetadata = {};
+      Object.keys(archDatabase).forEach(key => {
+        if (String(parseInt(key)) === key) {
+          legacyMetadata[key] = archDatabase[key];
+        }
+      });
+
+      archDatabase = {
+        savedPlans: {
+          "full-collection": {
+            name: "Full Collection Roadmap",
+            nodes: ghDatabase.map(item => item.number),
+            metadata: legacyMetadata
+          }
+        },
+        activePlanId: "full-collection"
+      };
+    }
+
+    // Always keep Full Collection roadmap updated with all active collection items
+    if (archDatabase.savedPlans["full-collection"]) {
+      archDatabase.savedPlans["full-collection"].nodes = ghDatabase.map(item => item.number);
+    }
+
+    if (!archDatabase.activePlanId || !archDatabase.savedPlans[archDatabase.activePlanId]) {
+      archDatabase.activePlanId = "full-collection";
+    }
   }
 
   // Compile full dynamic planning profiles by overlaying custom metadata onto GitHub collection
   function compilePlannerNodes() {
-    plannerNodes = ghDatabase.map(item => {
-      const overlay = archDatabase[item.number] || {};
-      
-      // Heuristic auto-derivation for unmapped items
-      let defaultLayer = "Catalog Operations";
-      const text = `${item.title} ${item.body || ''}`.toLowerCase();
-      if (text.includes("planning") || text.includes("scan") || text.includes("projection")) {
-        defaultLayer = "Planning & Scans";
-      } else if (text.includes("delete") || text.includes("row-level") || text.includes("mor") || text.includes("cow")) {
-        defaultLayer = "Row-Level Ops";
-      } else if (text.includes("transaction") || text.includes("isolation") || text.includes("commit")) {
-        defaultLayer = "Transactions";
-      } else if (text.includes("compaction") || text.includes("rewrite") || text.includes("expire") || text.includes("gc")) {
-        defaultLayer = "Maintenance & GC";
-      }
+    const activePlan = archDatabase.savedPlans[archDatabase.activePlanId] || { name: "Full Collection Roadmap", nodes: [], metadata: {} };
+    const nodesInPlan = activePlan.nodes || [];
+    const metadataMap = activePlan.metadata || {};
 
-      let defaultStatus = "planned";
-      if (item.state === "merged" || item.state === "closed") {
-        defaultStatus = "complete";
-      } else if (item.state === "open" && (item.body || "").includes("- [x]")) {
-        defaultStatus = "in-progress";
-      }
-
-      const layer = overlay.layer || defaultLayer;
-      const status = overlay.status || defaultStatus;
-      const customDependsOn = overlay.customDependsOn || [];
-      const customTasks = overlay.customTasks || [];
-      const taskStates = overlay.taskStates || {};
-
-      // Parse markdown checklists directly from body text
-      const parsedBodyTasks = parseChecklistFromMarkdown(item.body || "");
-
-      // Apply overridden states for body checklists
-      parsedBodyTasks.forEach(t => {
-        if (taskStates[t.id] !== undefined) {
-          t.completed = taskStates[t.id];
+    plannerNodes = ghDatabase
+      .filter(item => nodesInPlan.includes(item.number))
+      .map(item => {
+        const overlay = metadataMap[item.number] || {};
+        
+        // Heuristic auto-derivation for unmapped items
+        let defaultLayer = "Catalog Operations";
+        const text = `${item.title} ${item.body || ''}`.toLowerCase();
+        if (text.includes("planning") || text.includes("scan") || text.includes("projection")) {
+          defaultLayer = "Planning & Scans";
+        } else if (text.includes("delete") || text.includes("row-level") || text.includes("mor") || text.includes("cow")) {
+          defaultLayer = "Row-Level Ops";
+        } else if (text.includes("transaction") || text.includes("isolation") || text.includes("commit")) {
+          defaultLayer = "Transactions";
+        } else if (text.includes("compaction") || text.includes("rewrite") || text.includes("expire") || text.includes("gc")) {
+          defaultLayer = "Maintenance & GC";
         }
-      });
 
-      // Apply overridden states for custom planner checklists
-      customTasks.forEach(t => {
-        if (taskStates[t.id] !== undefined) {
-          t.completed = taskStates[t.id];
+        let defaultStatus = "planned";
+        if (item.state === "merged" || item.state === "closed") {
+          defaultStatus = "complete";
+        } else if (item.state === "open" && (item.body || "").includes("- [x]")) {
+          defaultStatus = "in-progress";
         }
+
+        const layer = overlay.layer || defaultLayer;
+        const status = overlay.status || defaultStatus;
+        const customDependsOn = overlay.customDependsOn || [];
+        const customTasks = overlay.customTasks || [];
+        const taskStates = overlay.taskStates || {};
+
+        // Parse markdown checklists directly from body text
+        const parsedBodyTasks = parseChecklistFromMarkdown(item.body || "");
+
+        // Apply overridden states for body checklists
+        parsedBodyTasks.forEach(t => {
+          if (taskStates[t.id] !== undefined) {
+            t.completed = taskStates[t.id];
+          }
+        });
+
+        // Apply overridden states for custom planner checklists
+        customTasks.forEach(t => {
+          if (taskStates[t.id] !== undefined) {
+            t.completed = taskStates[t.id];
+          }
+        });
+
+        // Filter links so they only point to nodes actually included in the active custom plan
+        const parsedDependsOn = (item.outgoing || []).filter(depId => nodesInPlan.includes(depId));
+        const filteredCustomDeps = customDependsOn.filter(depId => nodesInPlan.includes(depId));
+        const dependsOn = [...new Set([...parsedDependsOn, ...filteredCustomDeps])];
+
+        return {
+          id: item.number,
+          title: item.title,
+          type: item.type,
+          binding: item.binding || "core",
+          author: item.author,
+          desc: item.body || "",
+          url: item.url,
+          layer: layer,
+          status: status,
+          dependsOn: dependsOn,
+          customDependsOn: customDependsOn,
+          customTasks: customTasks,
+          parsedBodyTasks: parsedBodyTasks,
+          taskStates: taskStates
+        };
       });
-
-      // Combine inherent references with extra custom links
-      const dependsOn = [...new Set([...(item.outgoing || []), ...customDependsOn])];
-
-      return {
-        id: item.number,
-        title: item.title,
-        type: item.type,
-        binding: item.binding || "core",
-        author: item.author,
-        desc: item.body || "",
-        url: item.url,
-        layer: layer,
-        status: status,
-        dependsOn: dependsOn,
-        customDependsOn: customDependsOn,
-        customTasks: customTasks,
-        parsedBodyTasks: parsedBodyTasks,
-        taskStates: taskStates
-      };
-    });
   }
 
   // Parse markdown checklists in body text
@@ -484,11 +557,13 @@
   }
 
   async function resetToGitHubSample() {
-    if (confirm("Are you sure you want to reset all planner configurations and rely on the core GitHub Mock collection?")) {
+    if (confirm("Are you sure you want to reset all custom planner roadmaps and overlays? This will return you to the default Full Collection plan.")) {
       archDatabase = {};
-      selectedNodeId = "9280";
+      selectedNodeId = null;
+      alignPlannerDatabaseSchema();
       await savePlannerOverlay();
       renderPlanner();
+      updatePlanToolbarControls();
     }
   }
 
@@ -551,15 +626,6 @@
       row.onclick = () => {
         selectedNodeId = node.id;
         renderPlanner();
-      };
-
-      const bindingIcons = {
-        core: "🌐 Spec",
-        java: "☕ Java",
-        python: "🐍 Python",
-        rust: "🦀 Rust",
-        go: "🐹 Go",
-        cpp: "👾 C++"
       };
 
       row.innerHTML = `
@@ -629,10 +695,15 @@
       <div>
         <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
           <div class="eyebrow" style="margin-bottom: 2px;">Architectural Planning Detail</div>
-          <div style="display: flex; gap: 6px;">
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
             <button class="btn" style="padding: 2px 8px; font-size: 10.5px; border-color: var(--slate); background: transparent;" onclick="openDrawer('${active.id}')">
               ✏️ Edit Dependencies &amp; Layers
             </button>
+            ${archDatabase.activePlanId !== "full-collection" ? `
+              <button class="btn" style="padding: 2px 8px; font-size: 10.5px; border-color: var(--clay); color: var(--clay); background: transparent;" onclick="removeNodeFromActivePlan('${active.id}')" title="Remove this issue/PR from the active plan's DAG view.">
+                🗑️ Remove from Plan
+              </button>
+            ` : ''}
             <a href="${active.url}" target="_blank" class="btn" style="padding: 2px 8px; font-size: 10.5px; border-color: var(--slate); background: transparent; text-decoration: none;">
               View GitHub ↗
             </a>
@@ -698,23 +769,27 @@
 
   // 4. Checklist Actions
   async function toggleTaskCompletion(nodeId, taskId) {
-    if (!archDatabase[nodeId]) {
-      archDatabase[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
-    }
-    if (!archDatabase[nodeId].taskStates) {
-      archDatabase[nodeId].taskStates = {};
-    }
-    
-    // Read current state from compiled lists
-    const node = plannerNodes.find(n => n.id === nodeId);
-    if (node) {
-      const allTasks = [...(node.parsedBodyTasks || []), ...(node.customTasks || [])];
-      const task = allTasks.find(t => t.id === taskId);
-      if (task) {
-        const nextState = !task.completed;
-        archDatabase[nodeId].taskStates[taskId] = nextState;
-        await savePlannerOverlay();
-        renderPlanner();
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan) {
+      if (!plan.metadata) plan.metadata = {};
+      if (!plan.metadata[nodeId]) {
+        plan.metadata[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+      }
+      if (!plan.metadata[nodeId].taskStates) {
+        plan.metadata[nodeId].taskStates = {};
+      }
+      
+      const node = plannerNodes.find(n => n.id === nodeId);
+      if (node) {
+        const allTasks = [...(node.parsedBodyTasks || []), ...(node.customTasks || [])];
+        const task = allTasks.find(t => t.id === taskId);
+        if (task) {
+          const nextState = !task.completed;
+          plan.metadata[nodeId].taskStates[taskId] = nextState;
+          await savePlannerOverlay();
+          renderPlanner();
+        }
       }
     }
   }
@@ -725,24 +800,29 @@
     const textVal = input.value.trim();
     if (!textVal) return;
 
-    if (!archDatabase[nodeId]) {
-      archDatabase[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan) {
+      if (!plan.metadata) plan.metadata = {};
+      if (!plan.metadata[nodeId]) {
+        plan.metadata[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+      }
+      if (!plan.metadata[nodeId].customTasks) {
+        plan.metadata[nodeId].customTasks = [];
+      }
+
+      const newTask = {
+        id: "custom-task-" + Date.now(),
+        text: textVal,
+        completed: false
+      };
+
+      plan.metadata[nodeId].customTasks.push(newTask);
+      input.value = "";
+
+      await savePlannerOverlay();
+      renderPlanner();
     }
-    if (!archDatabase[nodeId].customTasks) {
-      archDatabase[nodeId].customTasks = [];
-    }
-
-    const newTask = {
-      id: "custom-task-" + Date.now(),
-      text: textVal,
-      completed: false
-    };
-
-    archDatabase[nodeId].customTasks.push(newTask);
-    input.value = "";
-
-    await savePlannerOverlay();
-    renderPlanner();
   }
 
   function handleTaskAdderKeydown(event, nodeId) {
@@ -752,10 +832,15 @@
   }
 
   async function deleteCustomTask(nodeId, taskId) {
-    if (archDatabase[nodeId] && archDatabase[nodeId].customTasks) {
-      archDatabase[nodeId].customTasks = archDatabase[nodeId].customTasks.filter(t => t.id !== taskId);
-      if (archDatabase[nodeId].taskStates) {
-        delete archDatabase[nodeId].taskStates[taskId];
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan && plan.metadata && plan.metadata[nodeId]) {
+      const meta = plan.metadata[nodeId];
+      if (meta.customTasks) {
+        meta.customTasks = meta.customTasks.filter(t => t.id !== taskId);
+      }
+      if (meta.taskStates) {
+        delete meta.taskStates[taskId];
       }
       await savePlannerOverlay();
       renderPlanner();
@@ -1068,9 +1153,11 @@
     if (!preview) return;
 
     if (plannerNodes.length === 0) {
-      preview.textContent = "No architectural roadmap components registered.";
+      preview.textContent = "No architectural roadmap components registered in this plan.";
       return;
     }
+
+    const activePlan = archDatabase.savedPlans[archDatabase.activePlanId] || { name: "Architectural Proposal" };
 
     // A. Compile Mermaid Flowchart
     let mermaidGraph = "```mermaid\nflowchart TD\n";
@@ -1116,9 +1203,9 @@
     });
 
     const fullProposalText = 
-`# GitHub Collection-Based Architectural Execution Proposal
+`# Architectural Execution Proposal: ${activePlan.name}
 
-This proposal outlines the dynamic dependency flow, language configuration matrices, and checklists compiled from the active GitHub Collection.
+This proposal outlines the dynamic dependency flow, language configuration matrices, and checklists compiled from the active planning workspace.
 
 ## 🔗 Integrated Architectural Graph Flow
 Below is the auto-generated Mermaid flowchart mapping all issue/PR reference links:
@@ -1170,11 +1257,11 @@ ${detailsList}
     const depsContainer = document.getElementById("drawer-deps-list");
     depsContainer.innerHTML = "";
 
-    // List all other nodes
+    // List all other nodes in the active custom plan
     const availableNodes = plannerNodes.filter(b => b.id !== nodeId);
 
     if (availableNodes.length === 0) {
-      depsContainer.innerHTML = `<span style="font-size: 11.5px; color: var(--g500); font-style: italic;">No other components registered</span>`;
+      depsContainer.innerHTML = `<span style="font-size: 11.5px; color: var(--g500); font-style: italic;">No other components registered in the active plan</span>`;
     } else {
       availableNodes.forEach(b => {
         depsContainer.innerHTML += `
@@ -1223,16 +1310,155 @@ ${detailsList}
     checkboxes.forEach(cb => selectedDeps.push(cb.value));
 
     // Save overlay to archDatabase
-    if (!archDatabase[editingNodeId]) {
-      archDatabase[editingNodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+    const activePlanId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activePlanId];
+    if (plan) {
+      if (!plan.metadata) plan.metadata = {};
+      if (!plan.metadata[editingNodeId]) {
+        plan.metadata[editingNodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+      }
+      plan.metadata[editingNodeId].layer = layerVal;
+      plan.metadata[editingNodeId].status = statusVal;
+      plan.metadata[editingNodeId].customDependsOn = selectedDeps;
     }
-    archDatabase[editingNodeId].layer = layerVal;
-    archDatabase[editingNodeId].status = statusVal;
-    archDatabase[editingNodeId].customDependsOn = selectedDeps;
 
     await savePlannerOverlay();
     closeDrawer();
     renderPlanner();
+  }
+
+  // 8. Custom Plan Actions & Toolbars
+  async function switchActivePlan(planId) {
+    archDatabase.activePlanId = planId;
+    selectedNodeId = null;
+    await savePlannerOverlay();
+    
+    // Pick first node as selected default
+    if (plannerNodes.length > 0) {
+      selectedNodeId = plannerNodes[0].id;
+    }
+    
+    renderPlanner();
+    updatePlanToolbarControls();
+  }
+
+  async function createNewPlan() {
+    const planName = prompt("Enter a descriptive name for your new architectural plan:").trim();
+    if (!planName) return;
+
+    const planId = "plan-" + Date.now();
+    archDatabase.savedPlans[planId] = {
+      name: planName,
+      nodes: [],
+      metadata: {}
+    };
+
+    await savePlannerOverlay();
+    await switchActivePlan(planId);
+  }
+
+  async function deleteActivePlan() {
+    const activeId = archDatabase.activePlanId;
+    if (activeId === "full-collection") {
+      alert("The 'Full Collection Roadmap' is a core system plan and cannot be deleted.");
+      return;
+    }
+
+    const plan = archDatabase.savedPlans[activeId];
+    if (confirm(`Are you sure you want to delete the custom plan '${plan.name}'?`)) {
+      delete archDatabase.savedPlans[activeId];
+      archDatabase.activePlanId = "full-collection";
+      selectedNodeId = null;
+      await savePlannerOverlay();
+      
+      if (plannerNodes.length > 0) {
+        selectedNodeId = plannerNodes[0].id;
+      }
+      
+      renderPlanner();
+      updatePlanToolbarControls();
+    }
+  }
+
+  async function addNodeToActivePlan() {
+    const select = document.getElementById("add-node-select");
+    const number = select.value;
+    if (!number) return;
+
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan && !plan.nodes.includes(number)) {
+      plan.nodes.push(number);
+      selectedNodeId = number;
+      await savePlannerOverlay();
+      renderPlanner();
+      updatePlanToolbarControls();
+    }
+  }
+
+  async function removeNodeFromActivePlan(number) {
+    const activeId = archDatabase.activePlanId;
+    if (activeId === "full-collection") {
+      alert("Nodes cannot be removed from the default 'Full Collection Roadmap' system plan.");
+      return;
+    }
+
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan) {
+      plan.nodes = plan.nodes.filter(n => n !== number);
+      if (plan.metadata && plan.metadata[number]) {
+        delete plan.metadata[number];
+      }
+
+      selectedNodeId = plan.nodes.length > 0 ? plan.nodes[0] : null;
+      await savePlannerOverlay();
+      renderPlanner();
+      updatePlanToolbarControls();
+    }
+  }
+
+  function updatePlanToolbarControls() {
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId] || { name: "", nodes: [] };
+
+    // Populate active plan selector
+    const planSelect = document.getElementById("select-active-plan");
+    if (planSelect) {
+      planSelect.innerHTML = "";
+      Object.keys(archDatabase.savedPlans).forEach(pid => {
+        const p = archDatabase.savedPlans[pid];
+        planSelect.innerHTML += `<option value="${pid}" ${pid === activeId ? 'selected' : ''}>${p.name}</option>`;
+      });
+    }
+
+    // Toggle Node Adder panel visibility
+    const adderContainer = document.getElementById("node-adder-container");
+    const nodeSelect = document.getElementById("add-node-select");
+    const delBtn = document.getElementById("btn-delete-plan");
+
+    if (activeId === "full-collection") {
+      if (adderContainer) adderContainer.style.display = "none";
+      if (delBtn) delBtn.style.display = "none";
+    } else {
+      if (adderContainer) adderContainer.style.display = "flex";
+      if (delBtn) delBtn.style.display = "inline-block";
+
+      // Populate nodes NOT in active plan
+      if (nodeSelect) {
+        nodeSelect.innerHTML = "";
+        const remaining = ghDatabase.filter(item => !plan.nodes.includes(item.number));
+
+        if (remaining.length === 0) {
+          nodeSelect.innerHTML = `<option value="">All issues/PRs added to plan</option>`;
+        } else {
+          // Sort remaining alphabetically
+          remaining.sort((a, b) => a.title.localeCompare(b.title));
+          remaining.forEach(item => {
+            nodeSelect.innerHTML += `<option value="${item.number}">#${item.number}: ${item.title.substring(0, 45)}...</option>`;
+          });
+        }
+      }
+    }
   }
 </script>
 </body>
