@@ -2,6 +2,7 @@
   {
     "id": "schema-evolution",
     "name": "Schema Evolution (Field IDs)",
+    "category": "Format Core",
     "specVersion": "v1",
     "desc": "Allows in-place additions, deletions, renames, and type widening in schemas. Every column is tracked strictly by unique, immutable Field IDs rather than matching by column names to prevent data corruption during query column projection.",
     "dependencies": [],
@@ -21,6 +22,7 @@
   {
     "id": "partition-evolution",
     "name": "Partition Spec Evolution",
+    "category": "Layout & Partitioning",
     "specVersion": "v1",
     "desc": "Allows evolving partition schemas dynamically (e.g. changing partition granularity from daily to hourly) without rewriting historical data. Query planners merge old and new layouts cleanly during manifest scans.",
     "dependencies": [
@@ -42,6 +44,7 @@
   {
     "id": "object-store-layout",
     "name": "Object Store File Layout",
+    "category": "Layout & Partitioning",
     "specVersion": "v1",
     "desc": "Generates deterministic 32-bit hash prefix strings at the beginning of data file paths (e.g., s3://bucket/9a2b.../data/) to distribute files across separate S3/GCS partitions and avoid bucket rate throttling.",
     "dependencies": [],
@@ -59,6 +62,7 @@
   {
     "id": "metadata-snapshot-isolation",
     "name": "Metadata Snapshot Isolation",
+    "category": "Metadata & Transactions",
     "specVersion": "v1",
     "desc": "Guarantees serializable isolation by tracking individual data files via manifest files and manifest lists. All writes produce new snapshots atomically swapped at the metastore, preventing partial visibility.",
     "dependencies": [],
@@ -76,6 +80,7 @@
   {
     "id": "rest-catalog",
     "name": "REST Catalog Protocol",
+    "category": "Metadata & Transactions",
     "specVersion": "v1",
     "desc": "Standardizes database metastore interactions via a client-agnostic OpenAPI catalog specification. Decouples engines from direct Hadoop/Hive metastore connections, serializing commits via check-and-put swap JSON payloads.",
     "dependencies": [
@@ -95,6 +100,7 @@
   {
     "id": "v2-position-deletes",
     "name": "MOR Position Deletes",
+    "category": "Row-Level Operations",
     "specVersion": "v2",
     "desc": "Implements row-level deletions by writing separate position delete files containing target data file paths and 0-indexed row offset positions. Readers perform a merge-on-read join during table scans.",
     "dependencies": [
@@ -117,6 +123,7 @@
   {
     "id": "v2-equality-deletes",
     "name": "MOR Equality Deletes",
+    "category": "Row-Level Operations",
     "specVersion": "v2",
     "desc": "Encodes row deletes by specifying predicates on one or more column values (e.g. id = 5). Readers apply equality predicate maps dynamically to discard matching scanned records.",
     "dependencies": [
@@ -140,6 +147,7 @@
   {
     "id": "v2-spec-enforcement",
     "name": "V2 Format Spec Enforcement",
+    "category": "Metadata & Transactions",
     "specVersion": "v2",
     "desc": "Validates spec compliance boundaries at table creation and mutation. Restricts writers from breaking V2 constraints and gates table updates if the layout version remains V1.",
     "dependencies": [],
@@ -157,6 +165,7 @@
   {
     "id": "v3-deletion-vectors",
     "name": "Deletion Vectors (Puffin Format)",
+    "category": "Row-Level Operations",
     "specVersion": "v3",
     "desc": "Introduces high-performance binary Roaring Bitmaps stored inside Puffin metadata files to track deletes. Each bit index represents a deleted row, completely deprecating position delete files.",
     "dependencies": [
@@ -176,6 +185,7 @@
   {
     "id": "v3-extended-timestamps",
     "name": "Extended Timestamps (ns)",
+    "category": "Format Core",
     "specVersion": "v3",
     "desc": "Extends timestamp types to support nanosecond precision for both local time and UTC zones (introducing timestamp_ns and timestamptz_ns types mapped across Parquet/ORC/Avro).",
     "dependencies": [
@@ -195,6 +205,7 @@
   {
     "id": "v3-complex-semi-structured",
     "name": "Variant, Geometry, & Geography",
+    "category": "Format Core",
     "specVersion": "v3",
     "desc": "Brings native support for semi-structured Variant types (similar to JSON but binary encoded and shredded) and WKB-encoded Geospatial types (Geometry and Geography) mapped to physical columns.",
     "dependencies": [
@@ -214,6 +225,7 @@
   {
     "id": "v3-column-defaults",
     "name": "Column Default Values",
+    "category": "Format Core",
     "specVersion": "v3",
     "desc": "Integrates column-level initial-default and write-default configurations directly inside the metadata schema definitions. Safely backfills missing column values for pre-existing files on projection.",
     "dependencies": [
@@ -233,6 +245,7 @@
   {
     "id": "v3-multi-arg-transforms",
     "name": "Multi-Argument Transforms",
+    "category": "Layout & Partitioning",
     "specVersion": "v3",
     "desc": "Allows declaring multi-column arguments in partition and sort orders (such as bucket[N, col1, col2] or complex logical functions), mapped inside the serialized JSON spec.",
     "dependencies": [
@@ -252,6 +265,7 @@
   {
     "id": "v3-row-lineage",
     "name": "Row Lineage Tracking",
+    "category": "Metadata & Transactions",
     "specVersion": "v3",
     "desc": "Adds tracking structures to trace individual record lineage, parent commits, and mutation origins across compactions and updates.",
     "dependencies": [
@@ -271,6 +285,7 @@
   {
     "id": "v3-table-encryption",
     "name": "Table Encryption Keys",
+    "category": "Security & Maintenance",
     "specVersion": "v3",
     "desc": "Registers built-in key-metadata structures enabling envelope encryption. Associates individual data and delete files with unique KMS-managed encryption keys directly in manifest records.",
     "dependencies": [
@@ -290,6 +305,7 @@
   {
     "id": "v4-removal-filesystem-commits",
     "name": "Deprecation of Hadoop rename commits",
+    "category": "Metadata & Transactions",
     "specVersion": "v4",
     "desc": "Completely removes HDFS atomic-rename-based HadoopTableOperations commits (deprecated in V3, fully deleted in V4) to enforce metastore check-and-put and REST catalog transactions.",
     "dependencies": [
@@ -309,6 +325,7 @@
   {
     "id": "v4-view-specification",
     "name": "Unified View Specifications",
+    "category": "Metadata & Transactions",
     "specVersion": "v4",
     "desc": "Fully integrates view metadata storage, dialect representations, and version logs in the core transactional specification, establishing atomic multi-view changes.",
     "dependencies": [
@@ -324,5 +341,25 @@
     },
     "issues": [],
     "notes": "View versions are immutable. Changes or adding SQL dialects create new versions, tracked cleanly in the view's current-version-id and version-log."
+  },
+  {
+    "id": "compaction-orphan-cleanup",
+    "name": "Compaction & Orphan GC",
+    "category": "Security & Maintenance",
+    "specVersion": "v1",
+    "desc": "Specifies layout compactors and garbage collection metrics. Safely merges small data/delete files (bin-packing/sorting) and removes orphaned files or expired snapshots without query interruption.",
+    "dependencies": [
+      "metadata-snapshot-isolation"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "planned",
+      "rust": "planned",
+      "go": "planned",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "Compaction must maintain delete file integrity, while GC processes must respect safe min-age constraints to prevent scanning active files."
   }
 ]
