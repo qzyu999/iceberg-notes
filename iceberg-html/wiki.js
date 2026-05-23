@@ -71,7 +71,7 @@ async function getDataDirectoryHandle(create = false) {
 async function migrateRootFilesToSubfolder() {
   if (!window.wikiDirHandle) return;
   try {
-    const filesToMigrate = ["wiki-todo-state.json", "wiki-notes.json", "wiki-github-collection.json"];
+    const filesToMigrate = ["wiki-todo-state.json", "wiki-notes.json", "wiki-github-collection.json", "wiki-features.json"];
     let hasFilesToMigrate = false;
     for (const filename of filesToMigrate) {
       try {
@@ -197,6 +197,23 @@ async function syncGitHubCollectionOnConnection() {
   }
 }
 
+async function syncFeaturesOnConnection() {
+  if (!window.wikiDirHandle) return;
+  try {
+    const diskFeatures = await window.readWikiFile("wiki-features.json");
+    if (diskFeatures) {
+      localStorage.setItem("wiki-features-state", JSON.stringify(diskFeatures));
+    } else {
+      const currentFeatures = JSON.parse(localStorage.getItem("wiki-features-state")) || [];
+      if (currentFeatures.length > 0) {
+        await window.writeWikiFile("wiki-features.json", currentFeatures);
+      }
+    }
+  } catch (e) {
+    console.error("Failed to sync features:", e);
+  }
+}
+
 // ── Floating Sync Pill State Updater ──
 function updateFloatingSyncPill() {
   const pill = document.getElementById("floating-sync-indicator");
@@ -288,6 +305,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             await syncTasksOnConnection();
             await syncNotesOnConnection();
             await syncGitHubCollectionOnConnection();
+            await syncFeaturesOnConnection();
             renderSidebar();
             updateFloatingSyncPill();
             window.dispatchEvent(new CustomEvent("wiki-sync-status-changed"));
@@ -306,6 +324,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           await syncTasksOnConnection();
           await syncNotesOnConnection();
           await syncGitHubCollectionOnConnection();
+          await syncFeaturesOnConnection();
           renderSidebar();
           updateFloatingSyncPill();
           window.dispatchEvent(new CustomEvent("wiki-sync-status-changed"));
@@ -389,7 +408,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     {
       category: "Community & Code",
       items: [
-        { name: "PR & Issue Explorer", path: "github-collection.html" }
+        { name: "PR & Issue Explorer", path: "github-collection.html" },
+        { name: "Feature Parity Matrix", path: "feature-matrix.html" }
       ]
     },
     {

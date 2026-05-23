@@ -1,0 +1,328 @@
+[
+  {
+    "id": "schema-evolution",
+    "name": "Schema Evolution (Field IDs)",
+    "specVersion": "v1",
+    "desc": "Allows in-place additions, deletions, renames, and type widening in schemas. Every column is tracked strictly by unique, immutable Field IDs rather than matching by column names to prevent data corruption during query column projection.",
+    "dependencies": [],
+    "bindings": {
+      "java": "complete",
+      "python": "complete",
+      "rust": "complete",
+      "go": "in-progress",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [
+      "9201"
+    ],
+    "notes": "Every upstream engine implementation (Spark, Flink, Trino, PyIceberg) relies on strict Field ID matching to map query projection columns. Column name maps are strictly helper indices."
+  },
+  {
+    "id": "partition-evolution",
+    "name": "Partition Spec Evolution",
+    "specVersion": "v1",
+    "desc": "Allows evolving partition schemas dynamically (e.g. changing partition granularity from daily to hourly) without rewriting historical data. Query planners merge old and new layouts cleanly during manifest scans.",
+    "dependencies": [
+      "schema-evolution"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "complete",
+      "rust": "in-progress",
+      "go": "planned",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [
+      "9150"
+    ],
+    "notes": "Scan planning logic merges old and new partitions using transform indexes. Requires logical row projection maps when computing matching schemas."
+  },
+  {
+    "id": "object-store-layout",
+    "name": "Object Store File Layout",
+    "specVersion": "v1",
+    "desc": "Generates deterministic 32-bit hash prefix strings at the beginning of data file paths (e.g., s3://bucket/9a2b.../data/) to distribute files across separate S3/GCS partitions and avoid bucket rate throttling.",
+    "dependencies": [],
+    "bindings": {
+      "java": "complete",
+      "python": "complete",
+      "rust": "complete",
+      "go": "in-progress",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "Highly recommended for streaming jobs writing thousands of files per minute to GCS, Azure, or AWS S3, spreading key distributions evenly across cloud partitions."
+  },
+  {
+    "id": "metadata-snapshot-isolation",
+    "name": "Metadata Snapshot Isolation",
+    "specVersion": "v1",
+    "desc": "Guarantees serializable isolation by tracking individual data files via manifest files and manifest lists. All writes produce new snapshots atomically swapped at the metastore, preventing partial visibility.",
+    "dependencies": [],
+    "bindings": {
+      "java": "complete",
+      "python": "complete",
+      "rust": "complete",
+      "go": "complete",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "Table metadata files record the history of previous snapshots, allowing seamless time-travel queries and safe rollback operations without locking tables."
+  },
+  {
+    "id": "rest-catalog",
+    "name": "REST Catalog Protocol",
+    "specVersion": "v1",
+    "desc": "Standardizes database metastore interactions via a client-agnostic OpenAPI catalog specification. Decouples engines from direct Hadoop/Hive metastore connections, serializing commits via check-and-put swap JSON payloads.",
+    "dependencies": [
+      "schema-evolution"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "complete",
+      "rust": "complete",
+      "go": "in-progress",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "Decouples runtime engines from specific cloud database connectors. Commits must send serializable MetadataUpdate payloads."
+  },
+  {
+    "id": "v2-position-deletes",
+    "name": "MOR Position Deletes",
+    "specVersion": "v2",
+    "desc": "Implements row-level deletions by writing separate position delete files containing target data file paths and 0-indexed row offset positions. Readers perform a merge-on-read join during table scans.",
+    "dependencies": [
+      "schema-evolution",
+      "partition-evolution"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "complete",
+      "rust": "complete",
+      "go": "in-progress",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [
+      "9280"
+    ],
+    "notes": "Position delete files must be sorted by file_path then pos to allow streaming filters while scanning, avoiding massive heap memory allocations."
+  },
+  {
+    "id": "v2-equality-deletes",
+    "name": "MOR Equality Deletes",
+    "specVersion": "v2",
+    "desc": "Encodes row deletes by specifying predicates on one or more column values (e.g. id = 5). Readers apply equality predicate maps dynamically to discard matching scanned records.",
+    "dependencies": [
+      "schema-evolution",
+      "partition-evolution"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "in-progress",
+      "rust": "in-progress",
+      "go": "planned",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [
+      "9120",
+      "9250"
+    ],
+    "notes": "Equality delete files store column subsets using original field IDs. Multiple column predicates are treated as a logical AND."
+  },
+  {
+    "id": "v2-spec-enforcement",
+    "name": "V2 Format Spec Enforcement",
+    "specVersion": "v2",
+    "desc": "Validates spec compliance boundaries at table creation and mutation. Restricts writers from breaking V2 constraints and gates table updates if the layout version remains V1.",
+    "dependencies": [],
+    "bindings": {
+      "java": "complete",
+      "python": "complete",
+      "rust": "complete",
+      "go": "in-progress",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "Format version upgrades from V1 to V2 are irreversible. Manifest file structures become stricter, requiring specific sequence numbers."
+  },
+  {
+    "id": "v3-deletion-vectors",
+    "name": "Deletion Vectors (Puffin Format)",
+    "specVersion": "v3",
+    "desc": "Introduces high-performance binary Roaring Bitmaps stored inside Puffin metadata files to track deletes. Each bit index represents a deleted row, completely deprecating position delete files.",
+    "dependencies": [
+      "v2-position-deletes"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "in-progress",
+      "rust": "in-progress",
+      "go": "planned",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "At most one deletion vector is allowed per data file. Writing a deletion vector replaces all historical position delete files, ensuring extremely fast scans."
+  },
+  {
+    "id": "v3-extended-timestamps",
+    "name": "Extended Timestamps (ns)",
+    "specVersion": "v3",
+    "desc": "Extends timestamp types to support nanosecond precision for both local time and UTC zones (introducing timestamp_ns and timestamptz_ns types mapped across Parquet/ORC/Avro).",
+    "dependencies": [
+      "schema-evolution"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "complete",
+      "rust": "complete",
+      "go": "in-progress",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "To guarantee bucketing/partitioning alignment, nanosecond timestamps are cast down to microsecond precision during 32-bit Murmur3 hashing."
+  },
+  {
+    "id": "v3-complex-semi-structured",
+    "name": "Variant, Geometry, & Geography",
+    "specVersion": "v3",
+    "desc": "Brings native support for semi-structured Variant types (similar to JSON but binary encoded and shredded) and WKB-encoded Geospatial types (Geometry and Geography) mapped to physical columns.",
+    "dependencies": [
+      "schema-evolution"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "in-progress",
+      "rust": "in-progress",
+      "go": "planned",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "Enables unified schema-on-read optimization for diverse workloads without requiring ad-hoc string parsing in user query layers."
+  },
+  {
+    "id": "v3-column-defaults",
+    "name": "Column Default Values",
+    "specVersion": "v3",
+    "desc": "Integrates column-level initial-default and write-default configurations directly inside the metadata schema definitions. Safely backfills missing column values for pre-existing files on projection.",
+    "dependencies": [
+      "schema-evolution"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "complete",
+      "rust": "complete",
+      "go": "in-progress",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "Initial default defines values for existing records; write default is written for newly created records when the field is omitted."
+  },
+  {
+    "id": "v3-multi-arg-transforms",
+    "name": "Multi-Argument Transforms",
+    "specVersion": "v3",
+    "desc": "Allows declaring multi-column arguments in partition and sort orders (such as bucket[N, col1, col2] or complex logical functions), mapped inside the serialized JSON spec.",
+    "dependencies": [
+      "partition-evolution"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "planned",
+      "rust": "planned",
+      "go": "planned",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "Improves data layout clustering for composite keys. Readers must ignore unknown partition transforms gracefully rather than failing."
+  },
+  {
+    "id": "v3-row-lineage",
+    "name": "Row Lineage Tracking",
+    "specVersion": "v3",
+    "desc": "Adds tracking structures to trace individual record lineage, parent commits, and mutation origins across compactions and updates.",
+    "dependencies": [
+      "metadata-snapshot-isolation"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "planned",
+      "rust": "planned",
+      "go": "planned",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "Critical for audit compliance and regulatory data tracing in complex lakehouse pipelines."
+  },
+  {
+    "id": "v3-table-encryption",
+    "name": "Table Encryption Keys",
+    "specVersion": "v3",
+    "desc": "Registers built-in key-metadata structures enabling envelope encryption. Associates individual data and delete files with unique KMS-managed encryption keys directly in manifest records.",
+    "dependencies": [
+      "metadata-snapshot-isolation"
+    ],
+    "bindings": {
+      "java": "complete",
+      "python": "planned",
+      "rust": "planned",
+      "go": "planned",
+      "cpp": "planned",
+      "core": "complete"
+    },
+    "issues": [],
+    "notes": "Uses KMS key wrapping. Encrypted key metadata is base64 encoded and stored safely in table metadata headers."
+  },
+  {
+    "id": "v4-removal-filesystem-commits",
+    "name": "Deprecation of Hadoop rename commits",
+    "specVersion": "v4",
+    "desc": "Completely removes HDFS atomic-rename-based HadoopTableOperations commits (deprecated in V3, fully deleted in V4) to enforce metastore check-and-put and REST catalog transactions.",
+    "dependencies": [
+      "rest-catalog"
+    ],
+    "bindings": {
+      "java": "in-progress",
+      "python": "planned",
+      "rust": "planned",
+      "go": "planned",
+      "cpp": "planned",
+      "core": "in-progress"
+    },
+    "issues": [],
+    "notes": "File system tables are fundamentally unsafe in object stores like AWS S3 or GCS due to lack of rename atomicity. Enforces a single secure catalog model."
+  },
+  {
+    "id": "v4-view-specification",
+    "name": "Unified View Specifications",
+    "specVersion": "v4",
+    "desc": "Fully integrates view metadata storage, dialect representations, and version logs in the core transactional specification, establishing atomic multi-view changes.",
+    "dependencies": [
+      "metadata-snapshot-isolation"
+    ],
+    "bindings": {
+      "java": "in-progress",
+      "python": "in-progress",
+      "rust": "planned",
+      "go": "planned",
+      "cpp": "planned",
+      "core": "in-progress"
+    },
+    "issues": [],
+    "notes": "View versions are immutable. Changes or adding SQL dialects create new versions, tracked cleanly in the view's current-version-id and version-log."
+  }
+]

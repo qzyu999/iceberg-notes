@@ -1,0 +1,1219 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feature Parity & Dependency Matrix — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+<style>
+  /* Layout modifications for split pane dashboard */
+  .matrix-workspace {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 32px;
+    margin-top: 24px;
+    align-items: start;
+  }
+  @media (max-width: 1200px) {
+    .matrix-workspace {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .matrix-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .matrix-search-bar {
+    display: flex;
+    gap: 12px;
+    flex: 1 1 400px;
+  }
+
+  .matrix-search-input {
+    flex: 1;
+    height: 38px;
+    border: 1.5px solid var(--g300);
+    border-radius: 8px;
+    padding: 0 14px;
+    font-family: var(--sans);
+    font-size: 13px;
+    background: var(--paper);
+    transition: all 120ms ease;
+  }
+  .matrix-search-input:focus {
+    border-color: var(--clay);
+    box-shadow: 0 0 0 3px rgba(217, 119, 87, 0.08);
+    outline: none;
+  }
+
+  .matrix-filter-select {
+    height: 38px;
+    border: 1.5px solid var(--g300);
+    border-radius: 8px;
+    padding: 0 10px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--g700);
+    background: var(--paper);
+    cursor: pointer;
+  }
+  .matrix-filter-select:focus {
+    border-color: var(--slate);
+    outline: none;
+  }
+
+  .matrix-detail-pane {
+    background: var(--paper);
+    border: 1.5px solid var(--slate);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 12px 32px rgba(20,20,19,0.03);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* Upstream and Downstream layout badges inside graph row */
+  .topology-nodes-container {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    flex: 1;
+  }
+
+  /* Drawer Form elements */
+  .drawer-form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .drawer-form-group label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--g500);
+    letter-spacing: 0.03em;
+  }
+  .drawer-input-text {
+    height: 38px;
+    border: 1.5px solid var(--g300);
+    border-radius: 8px;
+    padding: 0 12px;
+    font-family: var(--sans);
+    font-size: 13px;
+    outline: none;
+    transition: border 120ms;
+  }
+  .drawer-input-text:focus {
+    border-color: var(--clay);
+  }
+  .drawer-textarea {
+    min-height: 80px;
+    border: 1.5px solid var(--g300);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: var(--sans);
+    font-size: 13px;
+    resize: vertical;
+    outline: none;
+    transition: border 120ms;
+  }
+  .drawer-textarea:focus {
+    border-color: var(--clay);
+  }
+
+  .checkbox-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    max-height: 120px;
+    overflow-y: auto;
+    border: 1px solid var(--g200);
+    border-radius: 6px;
+    padding: 8px 12px;
+    background: var(--ivory);
+  }
+  .checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .status-selector-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px 16px;
+    border: 1px solid var(--g200);
+    border-radius: 6px;
+    padding: 12px;
+    background: var(--ivory);
+  }
+  .status-selector-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+  }
+  .status-selector-item select {
+    height: 26px;
+    font-size: 11px;
+    border-radius: 4px;
+    border: 1px solid var(--g300);
+    font-family: var(--sans);
+    background: var(--paper);
+  }
+</style>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Community &amp; Code</div>
+      <h1>Feature Parity &amp; <em>Dependency Matrix</em></h1>
+      <p class="tagline">
+        Map technical feature dependencies, spec compliance, runtime language parity, and link driving GitHub pull requests.
+      </p>
+    </header>
+
+    <div class="matrix-controls">
+      <div class="matrix-search-bar">
+        <input type="text" id="matrix-search" class="matrix-search-input" placeholder="Search features or descriptions..." oninput="renderMatrix()">
+        
+        <select id="filter-spec" class="matrix-filter-select" onchange="renderMatrix()">
+          <option value="all">All Specs</option>
+          <option value="v1">Spec v1</option>
+          <option value="v2">Spec v2</option>
+          <option value="v3">Spec v3</option>
+          <option value="v4">Spec v4 (Upcoming)</option>
+        </select>
+
+        <select id="filter-parity" class="matrix-filter-select" onchange="renderMatrix()">
+          <option value="all">All Binding Parity</option>
+          <option value="python-complete">Python Complete</option>
+          <option value="rust-complete">Rust Complete</option>
+          <option value="go-complete">Go Complete</option>
+          <option value="any-inprogress">Any In-Progress</option>
+        </select>
+      </div>
+
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-clay" onclick="openDrawer()">
+          ➕ Add Custom Feature
+        </button>
+        <button class="btn" style="background: transparent; border-color: var(--slate); color: var(--slate);" onclick="importSampleDataset()">
+          ⚡ Reset Sandbox Data
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Workspace Split Pane -->
+    <div class="matrix-workspace">
+      
+      <!-- Left Pane: Matrix Dashboard -->
+      <div>
+        <div class="matrix-container">
+          <table class="matrix-table">
+            <thead>
+              <tr>
+                <th style="width: 32%;">Feature Name</th>
+                <th style="width: 10%; text-align: center;">Spec</th>
+                <th style="width: 12%; text-align: center;">Java</th>
+                <th style="width: 12%; text-align: center;">Python</th>
+                <th style="width: 12%; text-align: center;">Rust</th>
+                <th style="width: 12%; text-align: center;">Go</th>
+                <th style="width: 10%; text-align: center;">C++</th>
+              </tr>
+            </thead>
+            <tbody id="matrix-body">
+              <!-- Dynamically populated by JS -->
+            </tbody>
+          </table>
+        </div>
+        
+        <div style="font-size: 12px; color: var(--g500); line-height: 1.5; font-family: var(--sans);">
+          💡 <strong>How to interact:</strong> Click any feature row inside the matrix grid to populate its directed topology chain, read specific implementation interaction constraints, and view associated implementation PRs and issues.
+        </div>
+      </div>
+
+      <!-- Right Pane: Detail & Interaction Panel -->
+      <div id="matrix-detail-panel" class="matrix-detail-pane">
+        <!-- Dynamically populated by renderDetailCard() -->
+      </div>
+
+    </div>
+
+  </main>
+</div>
+
+<!-- Add / Edit Feature Drawer Modal overlay -->
+<div class="matrix-drawer-backdrop" id="drawer-backdrop" onclick="closeDrawer()"></div>
+<div class="matrix-drawer" id="feature-drawer">
+  <div class="matrix-drawer-header">
+    <h3 class="matrix-drawer-title" id="drawer-title-label">Add Custom Feature</h3>
+    <button class="matrix-drawer-close" onclick="closeDrawer()">×</button>
+  </div>
+  
+  <div class="drawer-form-group">
+    <label for="feat-name">Feature Name</label>
+    <input type="text" id="feat-name" class="drawer-input-text" placeholder="e.g. Encryption &amp; Key Management">
+  </div>
+
+  <div class="drawer-form-group">
+    <label for="feat-spec">Format Spec Version</label>
+    <select id="feat-spec" class="matrix-filter-select" style="width: 100%;">
+      <option value="v1">Format Spec v1 (Metadata)</option>
+      <option value="v2">Format Spec v2 (Row deletes)</option>
+      <option value="v3">Format Spec v3 (Nanoseconds)</option>
+      <option value="v4">Format Spec v4 (Upcoming)</option>
+    </select>
+  </div>
+
+  <div class="drawer-form-group">
+    <label for="feat-desc">Architectural Description</label>
+    <textarea id="feat-desc" class="drawer-textarea" placeholder="Explain the purpose of this specification feature..."></textarea>
+  </div>
+
+  <div class="drawer-form-group">
+    <label>Upstream Requirements (Dependencies)</label>
+    <div class="checkbox-grid" id="drawer-deps-list">
+      <!-- Checked checkboxes injected dynamically based on current features -->
+    </div>
+  </div>
+
+  <div class="drawer-form-group">
+    <label>Language Binding Parity Statuses</label>
+    <div class="status-selector-grid">
+      <div class="status-selector-item">
+        <span>☕ Java:</span>
+        <select id="status-java">
+          <option value="complete">Complete</option>
+          <option value="in-progress">In Progress</option>
+          <option value="planned">Planned</option>
+          <option value="unsupported">Unsupported</option>
+        </select>
+      </div>
+      <div class="status-selector-item">
+        <span>🐍 Python:</span>
+        <select id="status-python">
+          <option value="complete">Complete</option>
+          <option value="in-progress">In Progress</option>
+          <option value="planned">Planned</option>
+          <option value="unsupported">Unsupported</option>
+        </select>
+      </div>
+      <div class="status-selector-item">
+        <span>🦀 Rust:</span>
+        <select id="status-rust">
+          <option value="complete">Complete</option>
+          <option value="in-progress">In Progress</option>
+          <option value="planned">Planned</option>
+          <option value="unsupported">Unsupported</option>
+        </select>
+      </div>
+      <div class="status-selector-item">
+        <span>🐹 Go:</span>
+        <select id="status-go">
+          <option value="complete">Complete</option>
+          <option value="in-progress">In Progress</option>
+          <option value="planned">Planned</option>
+          <option value="unsupported">Unsupported</option>
+        </select>
+      </div>
+      <div class="status-selector-item">
+        <span>👾 C++:</span>
+        <select id="status-cpp">
+          <option value="complete">Complete</option>
+          <option value="in-progress">In Progress</option>
+          <option value="planned">Planned</option>
+          <option value="unsupported">Unsupported</option>
+        </select>
+      </div>
+      <div class="status-selector-item">
+        <span>🌐 Core:</span>
+        <select id="status-core">
+          <option value="complete">Complete</option>
+          <option value="in-progress">In Progress</option>
+          <option value="planned">Planned</option>
+          <option value="unsupported">Unsupported</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="drawer-form-group">
+    <label for="feat-issues">Associated GitHub Issues / PRs</label>
+    <input type="text" id="feat-issues" class="drawer-input-text" placeholder="e.g. 9280, 9250 (comma separated)">
+    <span style="font-size: 10.5px; color: var(--g500); font-style: italic; margin-top: 2px;">
+      Links driving developers directly to cards in the PR &amp; Issue Explorer database.
+    </span>
+  </div>
+
+  <div style="display: flex; gap: 12px; margin-top: 12px;">
+    <button class="btn btn-clay" style="flex: 1;" onclick="saveFeatureFromDrawer()">
+      💾 Save Feature Configuration
+    </button>
+    <button class="btn" style="background: transparent; border-color: var(--clay); color: var(--clay);" id="btn-delete-feature" onclick="deleteActiveFeature()" style="display: none;">
+      🗑️ Delete
+    </button>
+  </div>
+</div>
+
+<script>
+  // Core State variables
+  let featuresDatabase = [];
+  let selectedFeatureId = null;
+  let ghDatabase = []; // Populated from local storage wiki-github-collection
+  let noteDebounceTimer = null;
+
+  // 1. Initial Default Dataset (Realistic Apache Iceberg Features)
+  const defaultFeatures = [
+    // ── SPECIFICATION V1 (Analytic Data Tables) ──
+    {
+      id: "schema-evolution",
+      name: "Schema Evolution (Field IDs)",
+      specVersion: "v1",
+      desc: "Allows in-place additions, deletions, renames, and type widening in schemas. Every column is tracked strictly by unique, immutable Field IDs rather than matching by column names to prevent data corruption during query column projection.",
+      dependencies: [],
+      bindings: {
+        java: "complete",
+        python: "complete",
+        rust: "complete",
+        go: "in-progress",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: ["9201"],
+      notes: "Every upstream engine implementation (Spark, Flink, Trino, PyIceberg) relies on strict Field ID matching to map query projection columns. Column name maps are strictly helper indices."
+    },
+    {
+      id: "partition-evolution",
+      name: "Partition Spec Evolution",
+      specVersion: "v1",
+      desc: "Allows evolving partition schemas dynamically (e.g. changing partition granularity from daily to hourly) without rewriting historical data. Query planners merge old and new layouts cleanly during manifest scans.",
+      dependencies: ["schema-evolution"],
+      bindings: {
+        java: "complete",
+        python: "complete",
+        rust: "in-progress",
+        go: "planned",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: ["9150"],
+      notes: "Scan planning logic merges old and new partitions using transform indexes. Requires logical row projection maps when computing matching schemas."
+    },
+    {
+      id: "object-store-layout",
+      name: "Object Store File Layout",
+      specVersion: "v1",
+      desc: "Generates deterministic 32-bit hash prefix strings at the beginning of data file paths (e.g., s3://bucket/9a2b.../data/) to distribute files across separate S3/GCS partitions and avoid bucket rate throttling.",
+      dependencies: [],
+      bindings: {
+        java: "complete",
+        python: "complete",
+        rust: "complete",
+        go: "in-progress",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: [],
+      notes: "Highly recommended for streaming jobs writing thousands of files per minute to GCS, Azure, or AWS S3, spreading key distributions evenly across cloud partitions."
+    },
+    {
+      id: "metadata-snapshot-isolation",
+      name: "Metadata Snapshot Isolation",
+      specVersion: "v1",
+      desc: "Guarantees serializable isolation by tracking individual data files via manifest files and manifest lists. All writes produce new snapshots atomically swapped at the metastore, preventing partial visibility.",
+      dependencies: [],
+      bindings: {
+        java: "complete",
+        python: "complete",
+        rust: "complete",
+        go: "complete",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: [],
+      notes: "Table metadata files record the history of previous snapshots, allowing seamless time-travel queries and safe rollback operations without locking tables."
+    },
+    {
+      id: "rest-catalog",
+      name: "REST Catalog Protocol",
+      specVersion: "v1",
+      desc: "Standardizes database metastore interactions via a client-agnostic OpenAPI catalog specification. Decouples engines from direct Hadoop/Hive metastore connections, serializing commits via check-and-put swap JSON payloads.",
+      dependencies: ["schema-evolution"],
+      bindings: {
+        java: "complete",
+        python: "complete",
+        rust: "complete",
+        go: "in-progress",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: [],
+      notes: "Decouples runtime engines from specific cloud database connectors. Commits must send serializable MetadataUpdate payloads."
+    },
+
+    // ── SPECIFICATION V2 (Row-level Deletes) ──
+    {
+      id: "v2-position-deletes",
+      name: "MOR Position Deletes",
+      specVersion: "v2",
+      desc: "Implements row-level deletions by writing separate position delete files containing target data file paths and 0-indexed row offset positions. Readers perform a merge-on-read join during table scans.",
+      dependencies: ["schema-evolution", "partition-evolution"],
+      bindings: {
+        java: "complete",
+        python: "complete",
+        rust: "complete",
+        go: "in-progress",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: ["9280"],
+      notes: "Position delete files must be sorted by file_path then pos to allow streaming filters while scanning, avoiding massive heap memory allocations."
+    },
+    {
+      id: "v2-equality-deletes",
+      name: "MOR Equality Deletes",
+      specVersion: "v2",
+      desc: "Encodes row deletes by specifying predicates on one or more column values (e.g. id = 5). Readers apply equality predicate maps dynamically to discard matching scanned records.",
+      dependencies: ["schema-evolution", "partition-evolution"],
+      bindings: {
+        java: "complete",
+        python: "in-progress",
+        rust: "in-progress",
+        go: "planned",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: ["9120", "9250"],
+      notes: "Equality delete files store column subsets using original field IDs. Multiple column predicates are treated as a logical AND."
+    },
+    {
+      id: "v2-spec-enforcement",
+      name: "V2 Format Spec Enforcement",
+      specVersion: "v2",
+      desc: "Validates spec compliance boundaries at table creation and mutation. Restricts writers from breaking V2 constraints and gates table updates if the layout version remains V1.",
+      dependencies: [],
+      bindings: {
+        java: "complete",
+        python: "complete",
+        rust: "complete",
+        go: "in-progress",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: [],
+      notes: "Format version upgrades from V1 to V2 are irreversible. Manifest file structures become stricter, requiring specific sequence numbers."
+    },
+
+    // ── SPECIFICATION V3 (Extended Types & Capabilities) ──
+    {
+      id: "v3-deletion-vectors",
+      name: "Deletion Vectors (Puffin Format)",
+      specVersion: "v3",
+      desc: "Introduces high-performance binary Roaring Bitmaps stored inside Puffin metadata files to track deletes. Each bit index represents a deleted row, completely deprecating position delete files.",
+      dependencies: ["v2-position-deletes"],
+      bindings: {
+        java: "complete",
+        python: "in-progress",
+        rust: "in-progress",
+        go: "planned",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: [],
+      notes: "At most one deletion vector is allowed per data file. Writing a deletion vector replaces all historical position delete files, ensuring extremely fast scans."
+    },
+    {
+      id: "v3-extended-timestamps",
+      name: "Extended Timestamps (ns)",
+      specVersion: "v3",
+      desc: "Extends timestamp types to support nanosecond precision for both local time and UTC zones (introducing timestamp_ns and timestamptz_ns types mapped across Parquet/ORC/Avro).",
+      dependencies: ["schema-evolution"],
+      bindings: {
+        java: "complete",
+        python: "complete",
+        rust: "complete",
+        go: "in-progress",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: [],
+      notes: "To guarantee bucketing/partitioning alignment, nanosecond timestamps are cast down to microsecond precision during 32-bit Murmur3 hashing."
+    },
+    {
+      id: "v3-complex-semi-structured",
+      name: "Variant, Geometry, & Geography",
+      specVersion: "v3",
+      desc: "Brings native support for semi-structured Variant types (similar to JSON but binary encoded and shredded) and WKB-encoded Geospatial types (Geometry and Geography) mapped to physical columns.",
+      dependencies: ["schema-evolution"],
+      bindings: {
+        java: "complete",
+        python: "in-progress",
+        rust: "in-progress",
+        go: "planned",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: [],
+      notes: "Enables unified schema-on-read optimization for diverse workloads without requiring ad-hoc string parsing in user query layers."
+    },
+    {
+      id: "v3-column-defaults",
+      name: "Column Default Values",
+      specVersion: "v3",
+      desc: "Integrates column-level initial-default and write-default configurations directly inside the metadata schema definitions. Safely backfills missing column values for pre-existing files on projection.",
+      dependencies: ["schema-evolution"],
+      bindings: {
+        java: "complete",
+        python: "complete",
+        rust: "complete",
+        go: "in-progress",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: [],
+      notes: "Initial default defines values for existing records; write default is written for newly created records when the field is omitted."
+    },
+    {
+      id: "v3-multi-arg-transforms",
+      name: "Multi-Argument Transforms",
+      specVersion: "v3",
+      desc: "Allows declaring multi-column arguments in partition and sort orders (such as bucket[N, col1, col2] or complex logical functions), mapped inside the serialized JSON spec.",
+      dependencies: ["partition-evolution"],
+      bindings: {
+        java: "complete",
+        python: "planned",
+        rust: "planned",
+        go: "planned",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: [],
+      notes: "Improves data layout clustering for composite keys. Readers must ignore unknown partition transforms gracefully rather than failing."
+    },
+    {
+      id: "v3-row-lineage",
+      name: "Row Lineage Tracking",
+      specVersion: "v3",
+      desc: "Adds tracking structures to trace individual record lineage, parent commits, and mutation origins across compactions and updates.",
+      dependencies: ["metadata-snapshot-isolation"],
+      bindings: {
+        java: "complete",
+        python: "planned",
+        rust: "planned",
+        go: "planned",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: [],
+      notes: "Critical for audit compliance and regulatory data tracing in complex lakehouse pipelines."
+    },
+    {
+      id: "v3-table-encryption",
+      name: "Table Encryption Keys",
+      specVersion: "v3",
+      desc: "Registers built-in key-metadata structures enabling envelope encryption. Associates individual data and delete files with unique KMS-managed encryption keys directly in manifest records.",
+      dependencies: ["metadata-snapshot-isolation"],
+      bindings: {
+        java: "complete",
+        python: "planned",
+        rust: "planned",
+        go: "planned",
+        cpp: "planned",
+        core: "complete"
+      },
+      issues: [],
+      notes: "Uses KMS key wrapping. Encrypted key metadata is base64 encoded and stored safely in table metadata headers."
+    },
+
+    // ── SPECIFICATION V4 (Upcoming - Active Development) ──
+    {
+      id: "v4-removal-filesystem-commits",
+      name: "Deprecation of Hadoop rename commits",
+      specVersion: "v4",
+      desc: "Completely removes HDFS atomic-rename-based HadoopTableOperations commits (deprecated in V3, fully deleted in V4) to enforce metastore check-and-put and REST catalog transactions.",
+      dependencies: ["rest-catalog"],
+      bindings: {
+        java: "in-progress",
+        python: "planned",
+        rust: "planned",
+        go: "planned",
+        cpp: "planned",
+        core: "in-progress"
+      },
+      issues: [],
+      notes: "File system tables are fundamentally unsafe in object stores like AWS S3 or GCS due to lack of rename atomicity. Enforces a single secure catalog model."
+    },
+    {
+      id: "v4-view-specification",
+      name: "Unified View Specifications",
+      specVersion: "v4",
+      desc: "Fully integrates view metadata storage, dialect representations, and version logs in the core transactional specification, establishing atomic multi-view changes.",
+      dependencies: ["metadata-snapshot-isolation"],
+      bindings: {
+        java: "in-progress",
+        python: "in-progress",
+        rust: "planned",
+        go: "planned",
+        cpp: "planned",
+        core: "in-progress"
+      },
+      issues: [],
+      notes: "View versions are immutable. Changes or adding SQL dialects create new versions, tracked cleanly in the view's current-version-id and version-log."
+    }
+  ];
+
+  // 2. Lifecycle & Sync Hook Initializations
+  document.addEventListener("DOMContentLoaded", async () => {
+    // Acknowledge main navigation sync status and IndexedDB bindings
+    window.addEventListener("wiki-sync-status-changed", async () => {
+      await loadFeatures();
+    });
+
+    await loadFeatures();
+    loadGitHubDatabase();
+  });
+
+  // Re-read local issues database to establish bidirectional driver links
+  function loadGitHubDatabase() {
+    const cached = localStorage.getItem("wiki-github-collection");
+    if (cached) {
+      ghDatabase = JSON.parse(cached);
+    }
+  }
+
+  // Load database from localStorage or folder sync
+  async function loadFeatures() {
+    let loaded = null;
+    
+    // Attempt local folder read first
+    if (window.wikiDirHandle) {
+      const diskData = await window.readWikiFile("wiki-features.json");
+      if (diskData) {
+        loaded = diskData;
+        localStorage.setItem("wiki-features-state", JSON.stringify(loaded));
+      }
+    }
+
+    if (!loaded) {
+      const cached = localStorage.getItem("wiki-features-state");
+      if (cached) {
+        loaded = JSON.parse(cached);
+      }
+    }
+
+    // Default Fallback
+    if (!loaded || loaded.length === 0) {
+      featuresDatabase = JSON.parse(JSON.stringify(defaultFeatures));
+      localStorage.setItem("wiki-features-state", JSON.stringify(featuresDatabase));
+    } else {
+      featuresDatabase = loaded;
+    }
+
+    // Preserve selection or default
+    if (featuresDatabase.length > 0) {
+      if (!selectedFeatureId || !featuresDatabase.find(f => f.id === selectedFeatureId)) {
+        selectedFeatureId = featuresDatabase[0].id;
+      }
+    } else {
+      selectedFeatureId = null;
+    }
+
+    renderMatrix();
+    renderDetailCard();
+  }
+
+  // Save changes to cache and physical disk
+  async function saveFeatures() {
+    localStorage.setItem("wiki-features-state", JSON.stringify(featuresDatabase));
+    if (window.wikiDirHandle) {
+      const success = await window.writeWikiFile("wiki-features.json", featuresDatabase);
+      if (!success) {
+        console.error("Failed to write wiki-features.json to workspace folder.");
+      }
+    }
+  }
+
+  // Reload sandbox defaults
+  async function importSampleDataset() {
+    featuresDatabase = JSON.parse(JSON.stringify(defaultFeatures));
+    selectedFeatureId = featuresDatabase[0].id;
+    await saveFeatures();
+    renderMatrix();
+    renderDetailCard();
+  }
+
+  // 3. Grid UI Renderers
+  function renderMatrix() {
+    const searchInput = document.getElementById("matrix-search").value.toLowerCase().trim();
+    const specFilter = document.getElementById("filter-spec").value;
+    const parityFilter = document.getElementById("filter-parity").value;
+    const tbody = document.getElementById("matrix-body");
+    
+    tbody.innerHTML = "";
+    
+    let filtered = featuresDatabase;
+
+    // A. Apply Search Filter
+    if (searchInput) {
+      filtered = filtered.filter(f => 
+        f.name.toLowerCase().includes(searchInput) || 
+        f.desc.toLowerCase().includes(searchInput)
+      );
+    }
+
+    // B. Apply Spec Version Filter
+    if (specFilter !== "all") {
+      filtered = filtered.filter(f => f.specVersion === specFilter);
+    }
+
+    // C. Apply Parity Filter
+    if (parityFilter !== "all") {
+      if (parityFilter === "python-complete") {
+        filtered = filtered.filter(f => f.bindings.python === "complete");
+      } else if (parityFilter === "rust-complete") {
+        filtered = filtered.filter(f => f.bindings.rust === "complete");
+      } else if (parityFilter === "go-complete") {
+        filtered = filtered.filter(f => f.bindings.go === "complete");
+      } else if (parityFilter === "any-inprogress") {
+        filtered = filtered.filter(f => 
+          Object.values(f.bindings).includes("in-progress")
+        );
+      }
+    }
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="7" style="text-align: center; color: var(--g500); padding: 32px; font-style: italic;">
+            No features match the active search and filter constraints.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    filtered.forEach(feat => {
+      const isSelected = feat.id === selectedFeatureId;
+      const row = document.createElement("tr");
+      if (isSelected) row.className = "active-row";
+      
+      row.onclick = () => {
+        selectedFeatureId = feat.id;
+        renderMatrix();
+        renderDetailCard();
+      };
+
+      row.innerHTML = `
+        <td style="font-weight: 600; color: var(--slate);">
+          ${feat.name}
+          <div style="font-size: 11px; color: var(--g500); font-weight: normal; margin-top: 3px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            ${feat.desc}
+          </div>
+        </td>
+        <td style="text-align: center; font-weight: bold; font-family: var(--mono); font-size: 11px; text-transform: uppercase;">
+          ${feat.specVersion}
+        </td>
+        <td style="text-align: center;"><span class="badge-matrix ${feat.bindings.java}">${feat.bindings.java}</span></td>
+        <td style="text-align: center;"><span class="badge-matrix ${feat.bindings.python}">${feat.bindings.python}</span></td>
+        <td style="text-align: center;"><span class="badge-matrix ${feat.bindings.rust}">${feat.bindings.rust}</span></td>
+        <td style="text-align: center;"><span class="badge-matrix ${feat.bindings.go}">${feat.bindings.go}</span></td>
+        <td style="text-align: center;"><span class="badge-matrix ${feat.bindings.cpp}">${feat.bindings.cpp}</span></td>
+      `;
+
+      tbody.appendChild(row);
+    });
+  }
+
+  // 4. Interactive Detail Panel Renderer
+  function renderDetailCard() {
+    const panel = document.getElementById("matrix-detail-panel");
+    const active = featuresDatabase.find(f => f.id === selectedFeatureId);
+
+    if (!active) {
+      panel.innerHTML = `
+        <div style="text-align: center; padding: 48px 24px; color: var(--g500); font-style: italic;">
+          <h3>No Feature Selected</h3>
+          <p>Please select a spec row from the matrix list to preview its architecture.</p>
+        </div>
+      `;
+      return;
+    }
+
+    // A. Parse and compile upstreams and downstreams for the DAG graph visualizer
+    const upstreamIds = active.dependencies || [];
+    const downstreamFeatures = featuresDatabase.filter(f => 
+      (f.dependencies || []).includes(active.id)
+    );
+
+    const renderTopologyRow = (title, nodes, isEmptyMessage) => {
+      if (nodes.length === 0) {
+        return `
+          <div class="topology-row">
+            <span class="topology-row-label">${title}</span>
+            <div class="topology-nodes-container">
+              <span class="feature-node-capsule empty-state">${isEmptyMessage}</span>
+            </div>
+          </div>
+        `;
+      }
+
+      const capsules = nodes.map(node => {
+        return `
+          <button class="feature-node-capsule" onclick="selectActiveFeatureById('${node.id}')" title="${node.desc}">
+            ${node.name} <span style="font-family: var(--mono); font-size: 8px; background: var(--g100); padding: 1px 3px; border-radius: 4px;">${node.specVersion.toUpperCase()}</span>
+          </button>
+        `;
+      }).join("");
+
+      return `
+        <div class="topology-row">
+          <span class="topology-row-label">${title}</span>
+          <div class="topology-nodes-container">${capsules}</div>
+        </div>
+      `;
+    };
+
+    // Map parent nodes
+    const parentNodes = upstreamIds.map(uid => featuresDatabase.find(f => f.id === uid)).filter(Boolean);
+
+    // B. Associated PRs / Issues section
+    loadGitHubDatabase(); // reload fresh local-storage records
+    const mappedIssues = active.issues || [];
+    let prSectionHTML = "";
+    
+    if (mappedIssues.length === 0) {
+      prSectionHTML = `<span style="font-size: 12.5px; color: var(--g500); font-style: italic;">No driving GitHub issues associated</span>`;
+    } else {
+      const cards = mappedIssues.map(issueNum => {
+        const matchingNode = ghDatabase.find(item => item.number === String(issueNum));
+        if (matchingNode) {
+          return `
+            <a href="github-collection.html?number=${issueNum}" class="ref-pill" style="text-decoration: none; text-align: left; display: inline-flex; gap: 8px; padding: 6px 12px; margin-top: 4px;" title="${matchingNode.title}">
+              <span class="badge-type ${matchingNode.type}" style="font-size: 9px; padding: 1px 3px;">${matchingNode.type.toUpperCase()}</span>
+              <span class="badge-binding ${matchingNode.binding || 'core'}" style="font-size: 8px; padding: 1px 3px;">${matchingNode.binding || 'core'}</span>
+              <strong>#${issueNum}</strong>
+              <span style="max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${matchingNode.title}</span>
+            </a>
+          `;
+        } else {
+          return `
+            <a href="github-collection.html?query=${issueNum}" class="ref-pill" style="text-decoration: none; display: inline-flex; gap: 6px; padding: 6px 12px; margin-top: 4px;" title="Review or register link offline">
+              <span class="badge-type issue" style="font-size: 9px; background: var(--g200); color: var(--g500);">UNREGISTERED</span>
+              <strong>#${issueNum}</strong>
+              <span style="color: var(--g500);">Add details offline ↗</span>
+            </a>
+          `;
+        }
+      }).join("");
+      
+      prSectionHTML = `<div style="display: flex; gap: 8px; flex-wrap: wrap;">${cards}</div>`;
+    }
+
+    panel.innerHTML = `
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+          <div class="eyebrow" style="margin-bottom: 2px;">Architectural Detail Panel</div>
+          <button class="btn" style="padding: 2px 8px; font-size: 10.5px; border-color: var(--slate); background: transparent;" onclick="openDrawer('${active.id}')">
+            ✏️ Edit Feature
+          </button>
+        </div>
+        <h2 style="margin: 4px 0 8px; font-size: 20px;">
+          <span style="font-family: var(--mono); background: var(--slate); color: var(--paper); font-size: 10px; font-weight: bold; padding: 2px 5px; border-radius: 4px; vertical-align: middle; margin-right: 4px;">
+            ${active.specVersion.toUpperCase()}
+          </span>
+          ${active.name}
+        </h2>
+        <p style="font-size: 13.5px; line-height: 1.55; color: var(--g700); margin: 0;">
+          ${active.desc}
+        </p>
+      </div>
+
+      <!-- Section: Topology DAG -->
+      <div>
+        <div class="nav-category" style="border-bottom: none; margin-bottom: 6px; font-size: 11px; font-weight: bold; letter-spacing: 0.05em;">
+          Directed Requirement Topology Map
+        </div>
+        <div class="topology-graph">
+          <!-- Upstream requirements -->
+          ${renderTopologyRow("Upstream Requirements", parentNodes, "No prerequisite features")}
+          
+          <!-- Flow separator -->
+          <div class="topology-row" style="min-height: 24px; padding-left: 146px;">
+            <span class="topology-flow-arrow">↓</span>
+          </div>
+
+          <!-- Active Node -->
+          <div class="topology-row" style="background: rgba(250, 249, 245, 0.7); border-radius: 6px; padding: 4px 8px;">
+            <span class="topology-row-label" style="color: var(--slate); font-weight: 800;">ACTIVE NODE</span>
+            <div class="topology-nodes-container">
+              <span class="feature-node-capsule active">${active.name}</span>
+            </div>
+          </div>
+
+          <!-- Flow separator -->
+          <div class="topology-row" style="min-height: 24px; padding-left: 146px;">
+            <span class="topology-flow-arrow">↓</span>
+          </div>
+
+          <!-- Downstream impacts -->
+          ${renderTopologyRow("Downstream Impact", downstreamFeatures, "No dependent features")}
+        </div>
+      </div>
+
+      <!-- Section: Associated GitHub Drivers -->
+      <div>
+        <div class="nav-category" style="border-bottom: none; margin-bottom: 6px; font-size: 11px; font-weight: bold; letter-spacing: 0.05em;">
+          Driving GitHub Issues &amp; PRs
+        </div>
+        ${prSectionHTML}
+      </div>
+
+      <!-- Section: Editable Feature Notes -->
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <div class="nav-category" style="border-bottom: none; margin: 0; font-size: 11px; font-weight: bold; letter-spacing: 0.05em;">
+            Interaction Complexity &amp; Architecture Notes
+          </div>
+          <span class="saving-indicator" id="notes-saving-badge">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="animation: spin 1s linear infinite;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            Saving to disk...
+          </span>
+        </div>
+        <textarea class="editable-notes-textarea" id="complexity-notes-box" oninput="debounceNotesSaving('${active.id}', this.value)" placeholder="Document any runtime interaction constraints or implementation notes. Changes auto-save instantly to your synced folder...">${active.notes || ""}</textarea>
+      </div>
+    `;
+  }
+
+  function selectActiveFeatureById(id) {
+    selectedFeatureId = id;
+    renderMatrix();
+    renderDetailCard();
+  }
+
+  // Notes debouncer auto-saves changes to the folder
+  function debounceNotesSaving(featureId, newText) {
+    const badge = document.getElementById("notes-saving-badge");
+    badge.classList.add("visible");
+
+    if (noteDebounceTimer) clearTimeout(noteDebounceTimer);
+    
+    noteDebounceTimer = setTimeout(async () => {
+      const feat = featuresDatabase.find(f => f.id === featureId);
+      if (feat) {
+        feat.notes = newText;
+        await saveFeatures();
+        console.log(`Saved notes for feature: ${featureId}`);
+      }
+      badge.classList.remove("visible");
+    }, 800);
+  }
+
+  // 5. Sliding Management Drawer Logic
+  let editingFeatureId = null;
+
+  function openDrawer(featureId = null) {
+    editingFeatureId = featureId;
+    const backdrop = document.getElementById("drawer-backdrop");
+    const drawer = document.getElementById("feature-drawer");
+    const titleLabel = document.getElementById("drawer-title-label");
+    const deleteBtn = document.getElementById("btn-delete-feature");
+
+    // Populate current features list in the dependency checklist
+    const depsContainer = document.getElementById("drawer-deps-list");
+    depsContainer.innerHTML = "";
+    
+    // Filter out the currently edited feature to avoid self-dependency loops
+    const availableDeps = featuresDatabase.filter(f => !featureId || f.id !== featureId);
+    
+    if (availableDeps.length === 0) {
+      depsContainer.innerHTML = `<span style="font-size: 11.5px; color: var(--g500); font-style: italic;">No other features registered to depend on</span>`;
+    } else {
+      availableDeps.forEach(feat => {
+        depsContainer.innerHTML += `
+          <label class="checkbox-item">
+            <input type="checkbox" name="drawer-deps" value="${feat.id}">
+            <span>${feat.name}</span>
+          </label>
+        `;
+      });
+    }
+
+    if (featureId) {
+      // EDIT MODE
+      titleLabel.textContent = "Edit Feature Configuration";
+      deleteBtn.style.display = "inline-block";
+      
+      const feat = featuresDatabase.find(f => f.id === featureId);
+      document.getElementById("feat-name").value = feat.name;
+      document.getElementById("feat-spec").value = feat.specVersion;
+      document.getElementById("feat-desc").value = feat.desc;
+      document.getElementById("feat-issues").value = (feat.issues || []).join(", ");
+      
+      // Select status bindings
+      document.getElementById("status-java").value = feat.bindings.java || "planned";
+      document.getElementById("status-python").value = feat.bindings.python || "planned";
+      document.getElementById("status-rust").value = feat.bindings.rust || "planned";
+      document.getElementById("status-go").value = feat.bindings.go || "planned";
+      document.getElementById("status-cpp").value = feat.bindings.cpp || "planned";
+      document.getElementById("status-core").value = feat.bindings.core || "planned";
+
+      // Select checkboxes
+      const checkboxes = document.querySelectorAll('input[name="drawer-deps"]');
+      const activeDeps = feat.dependencies || [];
+      checkboxes.forEach(cb => {
+        if (activeDeps.includes(cb.value)) {
+          cb.checked = true;
+        }
+      });
+
+    } else {
+      // ADD NEW FEATURE MODE
+      titleLabel.textContent = "Register Custom Feature";
+      deleteBtn.style.display = "none";
+      
+      document.getElementById("feat-name").value = "";
+      document.getElementById("feat-spec").value = "v1";
+      document.getElementById("feat-desc").value = "";
+      document.getElementById("feat-issues").value = "";
+      
+      document.getElementById("status-java").value = "planned";
+      document.getElementById("status-python").value = "planned";
+      document.getElementById("status-rust").value = "planned";
+      document.getElementById("status-go").value = "planned";
+      document.getElementById("status-cpp").value = "planned";
+      document.getElementById("status-core").value = "planned";
+    }
+
+    backdrop.classList.add("open");
+    drawer.classList.add("open");
+  }
+
+  function closeDrawer() {
+    document.getElementById("drawer-backdrop").classList.remove("open");
+    document.getElementById("feature-drawer").classList.remove("open");
+    editingFeatureId = null;
+  }
+
+  async function saveFeatureFromDrawer() {
+    const nameVal = document.getElementById("feat-name").value.trim();
+    const specVal = document.getElementById("feat-spec").value;
+    const descVal = document.getElementById("feat-desc").value.trim();
+    const issuesText = document.getElementById("feat-issues").value;
+
+    if (!nameVal || !descVal) {
+      alert("Please fill out the Feature Name and Architectural Description fields.");
+      return;
+    }
+
+    // Process Issue Numbers Array
+    const issuesArray = issuesText
+      .split(",")
+      .map(s => s.trim())
+      .filter(s => s.length > 0 && !isNaN(Number(s)));
+
+    // Process Selected Checkbox Dependencies
+    const selectedDeps = [];
+    const checkboxes = document.querySelectorAll('input[name="drawer-deps"]:checked');
+    checkboxes.forEach(cb => selectedDeps.push(cb.value));
+
+    // Construct Binding statuses object
+    const bindingStatus = {
+      java: document.getElementById("status-java").value,
+      python: document.getElementById("status-python").value,
+      rust: document.getElementById("status-rust").value,
+      go: document.getElementById("status-go").value,
+      cpp: document.getElementById("status-cpp").value,
+      core: document.getElementById("status-core").value
+    };
+
+    if (editingFeatureId) {
+      // Overwrite existing feature
+      const feat = featuresDatabase.find(f => f.id === editingFeatureId);
+      if (feat) {
+        feat.name = nameVal;
+        feat.specVersion = specVal;
+        feat.desc = descVal;
+        feat.dependencies = selectedDeps;
+        feat.bindings = bindingStatus;
+        feat.issues = issuesArray;
+      }
+    } else {
+      // Add brand new feature
+      const newId = nameVal.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+      
+      const newFeature = {
+        id: newId,
+        name: nameVal,
+        specVersion: specVal,
+        desc: descVal,
+        dependencies: selectedDeps,
+        bindings: bindingStatus,
+        issues: issuesArray,
+        notes: ""
+      };
+
+      // Ensure ID uniqueness
+      featuresDatabase = featuresDatabase.filter(f => f.id !== newId);
+      featuresDatabase.push(newFeature);
+      selectedFeatureId = newId;
+    }
+
+    await saveFeatures();
+    closeDrawer();
+    renderMatrix();
+    renderDetailCard();
+  }
+
+  async function deleteActiveFeature() {
+    if (!editingFeatureId) return;
+    
+    const confirmDelete = confirm("Are you sure you want to delete this feature from the parity matrix? This will clear its dependencies across all other features.");
+    if (!confirmDelete) return;
+
+    // Cascade dependency removals across other elements
+    featuresDatabase.forEach(f => {
+      f.dependencies = (f.dependencies || []).filter(dep => dep !== editingFeatureId);
+    });
+
+    // Drop active node
+    featuresDatabase = featuresDatabase.filter(f => f.id !== editingFeatureId);
+    
+    // Choose new selection
+    if (featuresDatabase.length > 0) {
+      selectedFeatureId = featuresDatabase[0].id;
+    } else {
+      selectedFeatureId = null;
+    }
+
+    await saveFeatures();
+    closeDrawer();
+    renderMatrix();
+    renderDetailCard();
+  }
+</script>
+</body>
+</html>
