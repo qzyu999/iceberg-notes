@@ -1,16 +1,18 @@
 [
   {
-    "number": "3118",
-    "title": "Upsert in PyIceberg: Use Cases, Trade Offs, and Strategy #3118",
-    "type": "discussion",
+    "number": "3364",
+    "title": "Feature: Incremental Append Scan",
+    "type": "pr",
     "state": "open",
     "stateReason": null,
     "binding": "python",
-    "author": "koenvo",
-    "body": "Upsert in PyIceberg: Use Cases, Trade Offs, and Strategy\nThere are multiple ongoing discussions around upsert, including:\n\nUpserting large table extremely slow #2159\nOptimize upsert performance for large datasets #2943\nI’ve previously worked on upsert internals (e.g. #1878 on complex type comparison fallbacks and #1995 on transaction semantics and batch scanning). While working in this area, I started thinking that we may benefit from clarifying the intended positioning and strategy of upsert.\n\nI’d like to frame this discussion from workload impact first, then implementation.\n\n1. Start from impact\nIn certain workloads, especially sparse updates into large tables, upsert can cause disproportionate:\n\nIO\nmemory usage\nsmall file creation\nrelative to the number of rows modified.\n\nThis suggests we may be implicitly optimizing for one class of workload while others pay a high cost.\n\n2. Representative use cases\nSome distinct scenarios:\n\n1. Sparse micro updates\nUpsert 10 random rows into a 10M row table, bucketed by user_id.\nExpectation:\n\nMinimal file rewrites\nPredictable memory usage\nNo explosion of small files\n2. Incremental ingestion\n10k to 200k rows per batch, mostly inserts, some updates.\nExpectation:\n\nGood write throughput\nStable resource usage\n3. Large backfill / bulk merge\nMillions of rows, high match rate.\nExpectation:\n\nEfficient batch processing\nPredictable rewrite cost\n4. Memory constrained environments\nSmall containers or serverless.\nExpectation:\n\nNo pathological memory spikes\nNo extreme expression or join planning overhead\nIt would help to clarify which of these upsert is primarily optimized for.\n\n3. Current conceptual model\nConceptually, upsert behaves like:\n\nDelete matching rows\nInsert new rows\nFor Copy on Write behavior, the delete step already rewrites the data files containing matching rows, even if only a single row matches.\n\nThe insert step then writes updated rows again as new data files.\n\nIn sparse scenarios, this can mean:\n\nFull file rewrites for single row updates\nAdditional small files created by the insert step\nRedundant IO for rows that are effectively being replaced\nThis is logically correct, but not always optimal.\n\n4. Alternative framing: file level rewrite\nAn alternative way to conceptualize upsert (for Copy on Write style tables) would be:\n\nIdentify affected data files\nLoad each affected file once\nApply updates in memory\nWrite merged files\nCommit as file replacements in a single snapshot\nInstead of modeling upsert as delete + insert, model it as:\n\nRewrite affected files with merged content.\n\nThis could reduce redundant IO and small file creation, at the cost of different memory and planning trade offs. This is similar to how AWS Athena does a MERGE INTO.\n\nMore broadly, there appear to be at least two conceptual strategies:\n\nMerge on Read style: delete files + append\nCopy on Write style: rewrite affected data files\nIt may be worth documenting or formalizing this distinction, even if not immediately user configurable.\n\n5. Python vs Rust execution\nIn some discussions, there is an implicit suggestion that deeper optimization should wait for a Rust execution layer.\n\nThat is a valid long term direction. However, it would help to clarify:\n\nIs the Python upsert intended to be production grade and performance competitive?\nOr is it primarily a functional implementation that will eventually defer heavy execution to Rust?\nIf Python is first class, then strategy clarity and optimization likely matter now.\n\nIf not, that should be documented so expectations are aligned.\n\n6. Main questions\nWhich workload is upsert primarily optimized for?\nShould strategy (MoR vs CoW style planning) be explicit or configurable?\nShould we document clear trade offs and expected behavior per workload?\nWhat is the intended long term role of Python vs Rust in execution?\nI’m happy to help structure documentation or experiments around these workload categories.",
-    "url": "https://github.com/apache/iceberg/discussions/3118",
+    "author": "smaheshwar-pltr",
+    "body": "\r\n\r\n<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- In the case this PR will resolve an issue, please replace ${GITHUB_ISSUE_ID} below with the actual Github issue id. -->\r\n<!-- Closes #${GITHUB_ISSUE_ID} -->\r\n\r\nCloses #2634.\r\n\r\n# Rationale for this change\r\n\r\nLargely a revival of Revival of https://github.com/apache/iceberg-python/issues/2634#issuecomment-3419845028. Please see that issue and previous PRs for context and motivation.\r\n\r\nReferences: https://github.com/apache/iceberg (containing Iceberg-Java and Spark, both are relevant to us), and https://github.com/apache/iceberg-cpp/pull/590. **Note:** I've asked an LLM to drop review comments on this PR linking to relevant places in the references mentioned, to aid reviewing.\r\n\r\n## Are these changes tested?\r\n\r\nYes, both unit and integration tests can be found in this PR.\r\n\r\n## Are there any user-facing changes?\r\n\r\nYes, there are removal of private methods but not public changes apart from the new feature. Please see the PR comments for more information.",
+    "url": "https://github.com/apache/iceberg-python/pull/3364",
     "incoming": [],
-    "outgoing": []
+    "outgoing": [
+      "2634"
+    ]
   },
   {
     "number": "3361",
@@ -24,6 +26,324 @@
     "url": "https://github.com/apache/iceberg-python/pull/3361",
     "incoming": [],
     "outgoing": []
+  },
+  {
+    "number": "3320",
+    "title": "Add commit retry and concurrency validation for writes",
+    "type": "pr",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "lawofcycles",
+    "body": "Closes #3319\r\nCloses #819\r\nCloses #269\r\n\r\n# Rationale for this change\r\n\r\nPyIceberg currently fails immediately with `CommitFailedException` when a concurrent transaction commits first, regardless of whether the writes actually conflict. Java Iceberg handles this transparently through its retry loop in `SnapshotProducer.commit()`.\r\n\r\nThis PR adds automatic commit retry with exponential backoff and data conflict validation to PyIceberg, matching Java Iceberg's behavior. On `CommitFailedException`, the retry loop refreshes table metadata, re-runs validation, and regenerates manifests. If validation detects a real data conflict, the operation aborts with `ValidationException` instead of retrying.\r\n\r\nThe retry loop is placed in `Transaction.commit_transaction()` rather than in individual snapshot producers. This is necessary because `Transaction.delete()` uses two producers (`_DeleteFiles` + `_OverwriteFiles`) that must be committed atomically. Retrying at the producer level would break this atomicity.\r\n\r\nValidation behavior follows Java's `BaseOverwriteFiles.validate()`, using the existing validation functions from `validate.py` that were contributed through #1935, #1938, #2050, and #3049.\r\n\r\n## Are these changes tested?\r\nYes. Unit tests and integration tests covering retry success, `ValidationException` abort, retry exhaustion, isolation levels, partition-level conflict detection, manifest cleanup, and producer state reset.\r\n\r\n## Are there any user-facing changes?\r\nYes. Previously, all concurrent write conflicts resulted in `CommitFailedException`.\r\n\r\n Now:\r\n- Compatible concurrent writes (e.g. concurrent appends) are retried automatically and succeed transparently\r\n- Incompatible concurrent writes (e.g. concurrent deletes on the same data) raise `ValidationException` instead of `CommitFailedException`\r\n\r\nThe following new table properties are supported.\r\n- `commit.retry.num-retries` (default: 4)\r\n- `commit.retry.min-wait-ms` (default: 100)\r\n- `commit.retry.max-wait-ms` (default: 60000)\r\n- `write.delete.isolation-level` (default: serializable)\r\n- `write.update.isolation-level` (default: serializable)",
+    "url": "https://github.com/apache/iceberg-python/pull/3320",
+    "incoming": [],
+    "outgoing": [
+      "819",
+      "1935",
+      "3049",
+      "2050",
+      "1938",
+      "3319"
+    ]
+  },
+  {
+    "number": "3319",
+    "title": "Add commit retry with data conflict validation",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "lawofcycles",
+    "body": "### Feature Request / Improvement\n## Summary\n\nThis proposal adds two capabilities to PyIceberg's write path, matching the behavior of Java Iceberg's `SnapshotProducer.commit()`.\n\n1. Automatic retry with exponential backoff when a catalog commit fails due to a concurrent transaction (`CommitFailedException`)\n2. Data conflict validation during retry to detect incompatible concurrent modifications (`ValidationException`)\n\nThese two capabilities work together. The retry loop refreshes table metadata and re-runs validation on each attempt. If validation passes, the commit is retried with regenerated manifests. If validation detects a real data conflict, the operation aborts without retry.\n\n## Motivation\n\nWhen multiple processes write to the same Iceberg table concurrently, PyIceberg fails immediately with `CommitFailedException` regardless of whether the writes actually conflict. This happens because `AssertRefSnapshotId` detects that the branch head has moved, but no retry or conflict analysis is attempted.\n\nIn practice, many concurrent write scenarios are safe to retry automatically. For example, concurrent appends never conflict with each other, and streaming writes rarely conflict with compaction operations targeting older partitions. Java Iceberg handles these cases transparently through its retry loop in `SnapshotProducer.commit()`.\n\nThrough a series of community contributions (#1935, #1938, #2050, #3049), PyIceberg already has the individual validation functions in `pyiceberg/table/update/validate.py`, built as the foundation for this work. This proposal completes the picture by integrating them into the commit flow alongside automatic retry.\n\n## Background\n\n### Java's commit flow\n\nJava's `SnapshotProducer.commit()` works as follows:\n\n```\ncommit():\n    retry(CommitFailedException, exponential_backoff):\n        apply():\n            refresh()                  # Load latest metadata from catalog\n            validate(base, parent)     # Check for data conflicts (subclass override)\n            manifests = apply(...)     # Generate manifests\n        ops.commit(base, updated)      # Atomic commit to catalog (CAS)\n```\n\nOn each retry attempt, `apply()` is called again, which refreshes metadata, re-runs validation against the latest snapshot, and regenerates manifests. Previous attempt's uncommitted manifests are cleaned up.\n\nThree outcomes are possible:\n\n| Catalog commit | Validation on retry | Result |\n|---|---|---|\n| Succeeds | (not executed) | Commit complete |\n| Fails (CommitFailedException) | Passes | Retry succeeds |\n| Fails (CommitFailedException) | Fails (ValidationException) | Abort |\n\n### PyIceberg's current commit flow\n\n```\n_SnapshotProducer._commit()     → generates manifests, returns (updates, requirements)\nTransaction._stage()            → accumulates updates\nTransaction.commit_transaction() → Table._do_commit() → Catalog.commit_table()\n```\n\nManifest generation and catalog commit happen in separate methods. `_SnapshotProducer` does not have access to the catalog commit step, and `Transaction.commit_transaction()` does not have access to the snapshot producers that generated the manifests.\n\n### Existing validation functions\n\nThrough a series of community contributions (#1935, #1938, #2050, #3049), the individual validation functions have been implemented in `pyiceberg/table/update/validate.py` as building blocks for concurrency safety. These were created as sub-tasks of #819 with the explicit goal of eventually integrating them into the write path. This proposal is the next step: wiring these functions into the commit flow.\n\n| PyIceberg function | Java equivalent | Called by |\n|---|---|---|\n| `_validate_added_data_files` | [`MergingSnapshotProducer.validateAddedDataFiles`](https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/MergingSnapshotProducer.java) | [`BaseOverwriteFiles.validate()`](https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/BaseOverwriteFiles.java), [`BaseRowDelta.validate()`](https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/BaseRowDelta.java) |\n| `_validate_deleted_data_files` | `MergingSnapshotProducer.validateDeletedDataFiles` | `BaseOverwriteFiles.validate()` |\n| `_validate_no_new_delete_files` | `MergingSnapshotProducer.validateNoNewDeleteFiles` | `BaseOverwriteFiles.validate()`, `BaseRowDelta.validate()` |\n| `_validate_no_new_deletes_for_data_files` | `MergingSnapshotProducer.validateNoNewDeletesForDataFiles` | `BaseOverwriteFiles.validate()`, `BaseRewriteFiles.validate()`, `BaseRowDelta.validate()` |\n\nIn Java, these are invoked from within `SnapshotProducer.apply()`, which is called on each retry attempt inside `SnapshotProducer.commit()`. Spark enables them by calling `validateNoConflictingData()` / `validateNoConflictingDeletes()` in [`SparkWrite.java`](https://github.com/apache/iceberg/blob/main/spark/v3.5/spark/src/main/java/org/apache/iceberg/spark/source/SparkWrite.java) based on the isolation level.\n\n## Design\n\n### Retry location\n\nThe retry loop lives in `Transaction.commit_transaction()`. When a catalog commit fails with `CommitFailedException`, the Transaction refreshes table metadata and re-executes each snapshot producer to regenerate manifests against the updated state.\n\nThis design follows from how PyIceberg structures its commit flow. A single `Transaction` can contain multiple snapshot producers executed sequentially. For example, `Transaction.delete()` first runs a `_DeleteFiles` producer (for whole-file deletes), then conditionally runs an `_OverwriteFiles` producer (for partial rewrites). Both are staged in the Transaction and committed together as one atomic catalog update. The retry mechanism needs to rebuild all of them as a unit.\n\nTo make this possible, snapshot producers register themselves with the Transaction when they commit. On retry, the Transaction re-executes each producer in registration order.\n\n### Retry flow\n\n```python\nclass Transaction:\n    _snapshot_producers: list[_SnapshotProducer]\n\n    def commit_transaction(self) -> Table:\n        if not self._updates:\n            return self._table\n\n        num_retries = ...  # from commit.retry.num-retries\n        for attempt in range(num_retries + 1):\n            try:\n                self._table._do_commit(self._updates, self._requirements)\n                return self._table\n            except CommitFailedException:\n                if attempt == num_retries:\n                    raise\n                self._table.refresh()\n                self._rebuild_snapshot_updates()\n                sleep(backoff_with_jitter(attempt))\n\n    def _rebuild_snapshot_updates(self):\n        # Keep non-snapshot updates (e.g. SetPropertiesUpdate)\n        self._updates = tuple(\n            u for u in self._updates\n            if not isinstance(u, (AddSnapshotUpdate, SetSnapshotRefUpdate))\n        )\n        self._requirements = tuple(\n            r for r in self._requirements\n            if not isinstance(r, AssertRefSnapshotId)\n        )\n        # Re-execute each producer in order\n        for producer in self._snapshot_producers:\n            producer._cleanup_uncommitted()\n            producer._refresh_for_retry()\n            producer._validate_concurrency()  # raises ValidationException if conflict\n            updates, requirements = producer._commit()\n            self._stage(updates, requirements)\n```\n\n### Producer refresh\n\nOn retry, each snapshot producer resets its state to generate new manifests against the updated metadata:\n\n```python\nclass _SnapshotProducer:\n    def _refresh_for_retry(self):\n        self._parent_snapshot_id = (\n            snapshot.snapshot_id\n            if (snapshot := self._transaction.table_metadata.snapshot_by_name(self._target_branch))\n            else None\n        )\n        self._snapshot_id = self._transaction.table_metadata.new_snapshot_id()\n        self._manifest_num_counter = itertools.count(0)\n        self.commit_uuid = uuid.uuid4()\n```\n\n`_added_data_files` and `_deleted_data_files` are preserved across retries. Data files written to storage are reusable since their content does not depend on the snapshot ID. Only manifests (which reference the snapshot ID and parent) need regeneration.\n\n`_DeleteFiles` additionally clears its `_compute_deletes` cached property, which depends on `_parent_snapshot_id`.\n\n### Producer registration\n\nSnapshot producers register with the Transaction when `commit()` is called:\n\n```python\nclass _SnapshotProducer:\n    def commit(self) -> None:\n        self._transaction._register_snapshot_producer(self)\n        self._transaction._apply(*self._commit())\n```\n\nThis preserves the existing `_commit()` → `_apply()` → `_stage()` call chain. The producer reference is used only during retry.\n\n### Validation\n\nEach snapshot producer subclass implements `_validate_concurrency()`.\n\n**_FastAppendFiles / _MergeAppendFiles:** No validation needed. Appends do not conflict with any operation because Iceberg has no primary key constraint.\n\n**_OverwriteFiles and _DeleteFiles:**\n\n```python\ndef _validate_concurrency(self):\n    if self._starting_snapshot is None:\n        return\n    if isolation_level == IsolationLevel.SERIALIZABLE:\n        _validate_added_data_files(...)\n    if conflict_detection_filter is not None:\n        _validate_no_new_delete_files(...)\n        _validate_deleted_data_files(...)\n    if self._deleted_data_files:\n        _validate_no_new_deletes_for_data_files(...)\n```\n\nBoth `_OverwriteFiles` and `_DeleteFiles` use the same set of validation functions. The user's overwrite/delete filter (`_predicate`) is used as the `conflict_detection_filter`, which enables file-level metrics-based conflict detection. The filter is evaluated against each data file's column statistics (min/max, null count) using `_InclusiveMetricsEvaluator`. Files that cannot contain matching rows are excluded from conflict checks. For partitioned tables with conditions on partition columns, this effectively provides partition-level filtering because file statistics align with partition boundaries.\n\nWhen `_predicate` is `AlwaysFalse()` (no row filter), `conflict_detection_filter` is set to `None` and `_validate_no_new_delete_files` / `_validate_deleted_data_files` are skipped. This matches Java's `BaseOverwriteFiles.validate()`, which skips these checks when `rowFilter() == AlwaysFalse()` to avoid treating all files as conflicts. `_validate_no_new_deletes_for_data_files` still runs if `_deleted_data_files` is non-empty, as it checks specific files rather than a filter range.\n\nFor example, when a user calls `table.delete(\"category == 'old'\")`, only concurrent changes to files whose column statistics overlap with `category == 'old'` are considered conflicts.\n\n### Conflict detection filter limitation\n\nIn Java Iceberg, Spark passes the scan's filter expressions as the `conflictDetectionFilter`, enabling fine-grained conflict detection even for operations without an explicit row filter. PyIceberg's `_OverwriteFiles` does not currently carry scan filter information.\n\nThis means that for filter-less full-table overwrites (`table.overwrite(df)` with `ALWAYS_TRUE`), the conflict detection filter effectively becomes `AlwaysTrue`, treating any concurrent change to the table as a conflict. In practice:\n\n- Operations with explicit filters (e.g. `table.delete(\"category == 'old'\")`) work well. Concurrent changes to different partitions are correctly identified as non-conflicting and retried successfully.\n- Filter-less full-table overwrites are more conservative than Spark. A concurrent append to a completely different partition would cause `ValidationException`, whereas Spark could determine it is safe through its scan filter.\n\nThis is a safe-side limitation: data integrity is never compromised. The only effect is that some operations that Spark would retry successfully will instead fail with `ValidationException` in PyIceberg. Concurrent full-table overwrites are uncommon in practice, so the real-world impact is expected to be small. Improving this would require passing scan filter information into `_OverwriteFiles`, which can be done as a follow-up.\n\n### Isolation levels\n\nA new `IsolationLevel` enum is introduced:\n\n```python\nclass IsolationLevel(str, Enum):\n    SERIALIZABLE = \"serializable\"\n    SNAPSHOT = \"snapshot\"\n```\n\nRead from table properties:\n- `write.delete.isolation-level` (default: serializable)\n- `write.update.isolation-level` (default: serializable)\n- `write.merge.isolation-level` (default: serializable)\n\nThe difference: under serializable isolation, `_validate_added_data_files` is called to detect conflicting appends to the same partition. Under snapshot isolation, this check is skipped, allowing concurrent appends to the same partition as long as no deletes conflict.\n\n### Retry configuration\n\nRead from table properties, matching Java defaults:\n\n- `commit.retry.num-retries` (default: 4)\n- `commit.retry.min-wait-ms` (default: 100)\n- `commit.retry.max-wait-ms` (default: 60000)\n- `commit.retry.total-timeout-ms` (default: 1800000)\n\n### Manifest cleanup\n\nUncommitted manifests from failed attempts are cleaned up on a best-effort basis. Each producer tracks the paths of manifests it writes, and `_cleanup_uncommitted()` deletes them before regeneration.\n\n## Scope\n\n### Included\n\n- Retry loop in `Transaction.commit_transaction()`\n- `IsolationLevel` enum and table property reading\n- Validation integration for `_OverwriteFiles` and `_DeleteFiles`\n- `commit.retry.*` table property support\n- Uncommitted manifest cleanup\n- Unit tests and integration tests\n\n### Not included\n\n- RowDelta (Merge-on-Read is not yet supported in PyIceberg)\n- `_RewriteFiles` validation (follow-up after #3131 merges)\n- \n## References\n\n- Java: [SnapshotProducer.java](https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/SnapshotProducer.java), [BaseOverwriteFiles.java](https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/BaseOverwriteFiles.java)\n- Spark: [SparkWrite.java](https://github.com/apache/iceberg/blob/main/spark/v3.5/spark/src/main/java/org/apache/iceberg/spark/source/SparkWrite.java)\n- Iceberg spec: [Commit Conflict Resolution and Retry](https://iceberg.apache.org/spec/#commit-conflict-resolution-and-retry)\n- Blog: [Manage concurrent write conflicts in Apache Iceberg on the AWS Glue Data Catalog](https://aws.amazon.com/blogs/big-data/manage-concurrent-write-conflicts-in-apache-iceberg-on-the-aws-glue-data-catalog/)\n\n",
+    "url": "https://github.com/apache/iceberg-python/issues/3319",
+    "incoming": [
+      "3320"
+    ],
+    "outgoing": [
+      "819",
+      "1935",
+      "3049",
+      "3131",
+      "2050",
+      "1938"
+    ]
+  },
+  {
+    "number": "3285",
+    "title": "Add support for Equality Deletes on DeleteFileIndex",
+    "type": "pr",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "rambleraptor",
+    "body": "<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- In the case this PR will resolve an issue, please replace ${GITHUB_ISSUE_ID} below with the actual Github issue id. -->\r\n<!-- Closes #${GITHUB_ISSUE_ID} -->\r\nPart of #3270 \r\n\r\n# Rationale for this change\r\nThis adds support for getting equality deletes in the DeleteFileIndex. \r\n\r\nI'm very purposefully ignoring them in `_read_all_delete_files` because they will crash. \r\n\r\n## Are these changes tested?\r\nI made some equality deletes by-hand and had PyIceberg read them to see the indexes. Worked as expected. If you know a way to create equality deletes, I can test those as well.\r\n\r\n## Are there any user-facing changes?\r\n- Adds support for equality deletes in DeleteFileIndex\r\n\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n",
+    "url": "https://github.com/apache/iceberg-python/pull/3285",
+    "incoming": [],
+    "outgoing": [
+      "3270"
+    ]
+  },
+  {
+    "number": "3270",
+    "title": "Equality Delete support",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "rambleraptor",
+    "body": "One of the missing v2 features in PyIceberg is reading from equality delete files. \n\nI believe PyIceberg needs support for reading these files or else we run into situations where people are querying deleted data. Happy to be disproven on this!",
+    "url": "https://github.com/apache/iceberg-python/issues/3270",
+    "incoming": [
+      "3285"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "3131",
+    "title": "feat: Add metadata-only replace API to Table for REPLACE snapshot operations",
+    "type": "pr",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "qzyu999",
+    "body": "<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- In the case this PR will resolve an issue, please replace ${GITHUB_ISSUE_ID} below with the actual Github issue id. -->\r\nCloses #3130\r\n\r\n# Rationale for this change\r\nIn a current PR (#3124, part of #1092), the proposed `replace()` API accepts a PyArrow dataframe (`pa.Table`), forcing the table engine to physically serialize data during a metadata transaction commit. This couples execution with the catalog, diverges from Java Iceberg's native `RewriteFiles` builder behavior, and fails to register under `Operation.REPLACE`. \r\n\r\nThis PR redesigns `table.replace()` and `transaction.replace()` to accept `Iterable[DataFile]` inputs. By externalizing physical data writing (e.g., compaction via Ray), the new explicit metadata-only `_RewriteFiles` SnapshotProducer can natively swap snapshot pointers in the manifests, perfectly inheriting ancestral sequence numbers for `DELETED` entries to ensure time-travel equivalence.\r\n\r\n## Are these changes tested?\r\n**Yes.**\r\n\r\nFully exhaustive test coverage has been added to `tests/table/test_replace.py`. The suite validates:\r\n1. Context manager executions tracking valid history growth (`len(table.history())`).\r\n2. Snapshot summary bindings asserting strict `Operation.REPLACE` tags.\r\n3. Accurate evaluation of delta-metrics (added/deleted files and records tracking perfectly).\r\n4. **Low-level serialization:** Bypassed high-level discard filters on `manifest.fetch_manifest_entry(discard_deleted=False)` to natively assert that `status=DELETED` overrides are accurately preserving avro sequence numbers.\r\n5. Idempotent edge cases where `replace([], [])` successfully short-circuits the commit loop without mutating history.\r\n\r\n## Are there any user-facing changes?\r\n**Yes.**\r\n\r\nThe method signature for `Table.replace()` and `Transaction.replace()` has been updated from the original PR #3124. \r\nIt no longer accepts a PyArrow DataFrame (`df: pa.Table`). Instead, it now requests two arguments:\r\n`files_to_delete: Iterable[DataFile]` and `files_to_add: Iterable[DataFile]`, following the convention seen in the Java implementation.\r\n\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n*(Please add the `changelog` label)*\r\n\r\n## AI Disclosure\r\nAI was used to help understand the code base and draft code changes. All code changes have been thoroughly reviewed, ensuring that the code changes are in line with a broader understanding of the codebase.\r\n\r\n- Worth deeper review after AI-assistance:\r\n- The `test_invalid_operation()` in `tests/table/test_snapshots.py` previously used `Operation.REPLACE` as a value to test invalid operations, but with this change `Operation.REPLACE` becomes valid. In place I just put a dummy Operation.\r\n- The `_RewriteFiles` in `pyiceberg/table/update/snapshot.py` overrides the `_deleted_entries` and `_existing_manifests` functions. I sought to test this thoroughly that it was done correctly. I am thinking it's possible to improve the test suite to make this more rigorous. I am open to suggestions on how that could be done.",
+    "url": "https://github.com/apache/iceberg-python/pull/3131",
+    "incoming": [
+      "3319"
+    ],
+    "outgoing": [
+      "3130",
+      "1092",
+      "3124"
+    ]
+  },
+  {
+    "number": "3130",
+    "title": "Feature: Add metadata-only replace API to Table for REPLACE snapshot operations",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "qzyu999",
+    "body": "### Feature Request / Improvement\n\n## Description\nThis issue proposes implementing a metadata-only `replace` API in PyIceberg, enabling orchestrators to submit a set of `DataFile`s to delete and a set of `DataFile`s to append in a single atomic transaction. \n\nThis functionality is critical for maintenance operations such as data compaction (the \"small files\" problem), ensuring the logical state of the table remains unaltered while physical data layout is optimized.\n\n### Background\nIn a current PR (#3124, part of #1092), PyIceberg's `replace` semantics are tightly coupled with PyArrow dataframes (`def replace(self, df: pa.Table)`). This approach introduces several architectural flaws:\n1. **Coupling Physical Serialization with Metadata:** It forces a `.parquet` write serialization hook directly into the snapshot commit transaction, increasing the risk of schema degradation and blocking network topologies.\n2. **Missing `Operation.REPLACE`:** The current system uses primitives that log as `APPEND` or `OVERWRITE`, muddying the table history and complicating snapshot expiry/maintenance.\n3. **Java Inconsistency:** This severely drifts from Java Iceberg's native `org.apache.iceberg.RewriteFiles` specification, which strictly isolates the builder into accepting purely `DataFile` pointers.\n\n### Proposed Solution\nTo fix this and achieve logical equivalence, we must implement an exact port of Java's `RewriteFiles` builder API into PyIceberg's native `_SnapshotProducer` engine.\n\n1. **Introduce `_RewriteFiles` Snapshot Producer:** \n   Add a new `_RewriteFiles` class that specifically targets replacing existing files. This class will implement:\n   - `_deleted_entries()`: To find the existing target files and re-emit them as `DELETED` entries, defensively keeping their ancestral `sequence_number`s completely intact for time travel compatibility.\n   - `_existing_manifests()`: To scavenge unchanged manifests natively, skipping deep rewrites and only mutating manifests impacted by the deleted files.\n\n2. **Builder Hook Implementation:**\n   Implement `UpdateSnapshot().replace()` which configures the transaction with `Operation.REPLACE`.\n\n3. **Expose Shorthands on Table & Transaction:**\n   Add `replace` APIs on both `Table` and `Transaction` taking `Iterable[DataFile]` arguments to elegantly wrap the snapshot mutation:\n   ```python\n   def replace(\n       self,\n       files_to_delete: Iterable[DataFile],\n       files_to_add: Iterable[DataFile],\n       snapshot_properties: dict[str, str] = EMPTY_DICT,\n       branch: str | None = MAIN_BRANCH,\n   ) -> None:\n       ...\n   ```\n\n### Notable canges\n- `replace()` API implemented on both `Table` and `Transaction` using `Iterable[DataFile]`.\n- PyArrow `.parquet` write logic decoupled from the metadata transaction.\n- `_RewriteFiles` correctly copies ancestral `sequence_number` pointers for `DELETED` and `EXISTING` manifest entries.\n- Snapshots committed via the `replace()` hook possess a Summary containing `operation=Operation.REPLACE`.\n- Unit tests pass simulating data file swaps and summary verifications.\n\n### Related Java API\nInspired heavily by Java's builder interface: https://github.com/apache/iceberg/blob/main/api/src/main/java/org/apache/iceberg/RewriteFiles.java\n\n### AI Disclosure\nAI was used to help understand the code base and draft code changes. All code changes have been thoroughly reviewed, ensuring that the code changes are in line with a broader understanding of the codebase.\n\n- Worth deeper review after AI-assistance:\n- The `test_invalid_operation()` in `tests/table/test_snapshots.py` previously used `Operation.REPLACE` as a value to test invalid operations, but with this change `Operation.REPLACE` becomes valid. In place I just put a dummy Operation.\n- The `_RewriteFiles` in `pyiceberg/table/update/snapshot.py` overrides the `_deleted_entries` and `_existing_manifests` functions. I sought to test this thoroughly that it was done correctly. I am thinking it's possible to improve the test suite to make this more rigorous. I am open to suggestions on how that could be done.\n",
+    "url": "https://github.com/apache/iceberg-python/issues/3130",
+    "incoming": [
+      "3131"
+    ],
+    "outgoing": [
+      "1092",
+      "3124"
+    ]
+  },
+  {
+    "number": "3129",
+    "title": "Upsert with 1M rows extremely slow due to `create_match_filter` and `txn.delete()` performance",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "ayushk7102",
+    "body": "### Apache Iceberg version\n\n0.11.0\n\n### Please describe the bug 🐞\n\nCC @goutamvenkat-anyscale @koenvo @Fokko \n\nHello! We are implementing distributed writes from Ray Data to Iceberg. As part of upserts, we:\n\n1. Write data files in parallel across Ray workers (each worker writes its share of Parquet files directly to storage and returns `DataFile` metadata + the upsert key columns back to the driver)\n2. On the driver, concatenate all upsert keys collected from workers, call `create_match_filter` to build a delete predicate, then call `txn.delete()` followed by an append to commit\n\nUpserting 1M rows (383 MiB) into an Iceberg table takes **~17.5 minutes**, almost entirely in the delete step:\n\n```\ncreate_match_filter (1M keys → In filter):   10.26s\ntxn.delete():                              1054.35s\nappend + commit:                              1.14s\n─────────────────────────────────────────────────────\nTotal upsert commit:                       1065.75s\n```\n\nPyIceberg version `0.11.0`\n\nThis matches what's reported in #2159 and #2138.\n\nThe bottlenecks are:\n1. **`create_match_filter`** — constructs a Python `BooleanExpression` node per row, which is expensive at 1M+ keys\n2. **`txn.delete()`** — evaluates the resulting giant `In` expression against the table's data files with no partition pruning, effectively doing a full table scan\n\nWe have a few questions:\n\n1. **Merge-on-read upserts** — is this on the roadmap, and if so, roughly when? MoR would let us avoid the expensive delete + rewrite cycle entirely for large upserts.\n2. **Optimizing `create_match_filter` or `txn.delete()`** — is there a recommended way to speed these up today? For example, batching the `In` filter, or passing a partition-level hint to constrain the file scan?\n3. **Partition-aware deletes** — if the upsert key columns overlap with partition columns, is there a supported way to restrict `txn.delete()` to only the relevant partitions, rather than scanning the full table?\n\n## Related\n\n- #2159 — Upserting large table extremely slow\n- #2138 — Upsertion memory usage grows exponentially as table size grows\n- #2943 — Optimize upsert performance for large datasets\n\n\n### Willingness to contribute\n\n- [ ] I can contribute a fix for this bug independently\n- [x] I would be willing to contribute a fix for this bug with guidance from the Iceberg community\n- [ ] I cannot contribute a fix for this bug at this time",
+    "url": "https://github.com/apache/iceberg-python/issues/3129",
+    "incoming": [
+      "2943"
+    ],
+    "outgoing": [
+      "2159",
+      "2943"
+    ]
+  },
+  {
+    "number": "3124",
+    "title": "feat: Add table.maintenance.compact() for full-table data file compaction",
+    "type": "pr",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "qzyu999",
+    "body": "Closes #1092\r\n\r\n# Rationale for this change\r\nThis introduces a simplified, whole-table compaction strategy via the MaintenanceTable API (`table.maintenance.compact()`).\r\n\r\nKey implementation details:\r\n- Reads the entire table state into memory via `.to_arrow()`.\r\n  - Note: This initial implementation uses an in-memory Arrow-based rewrite strategy. Future iterations can extend this to support streaming or distributed rewrites for larger-than-memory datasets.\r\n- Uses `table.overwrite()` to rewrite data, leveraging PyIceberg's target file bin-packing (`write.target-file-size-bytes`) natively.\r\n- Ensures atomicity by executing within a table transaction.\r\n- Explicitly sets `snapshot-type: replace` and `replace-operation: compaction` to ensure correct metadata history for downstream engines.\r\n- Includes a guard to safely ignore compaction requests on empty tables.\r\n\r\n## Are these changes tested?\r\nIncludes full Pytest coverage in `tests/table/test_maintenance.py`.\r\n\r\n## Are there any user-facing changes?\r\nYes. This PR adds a new compact() method to the TableMaintenance API, allowing users to perform file compaction on existing Iceberg tables.\r\n\r\nExample usage:\r\n```Python\r\ntable = catalog.load_table(\"default.my_table\")\r\n# Merges small files into larger ones based on table properties\r\ntable.maintenance.compact()\r\n```\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n\r\nEdit: It looks like I'm not able to add the changelog label, hopefully someone with permissions can do so.\r\n",
+    "url": "https://github.com/apache/iceberg-python/pull/3124",
+    "incoming": [
+      "3130",
+      "3131"
+    ],
+    "outgoing": [
+      "1092"
+    ]
+  },
+  {
+    "number": "3118",
+    "title": "Upsert in PyIceberg: Use Cases, Trade Offs, and Strategy",
+    "type": "discussion",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "koenvo",
+    "body": "Automatically generated planning placeholder for discussion #3118.\n\nResolves references: #2159, #2943.\n\nYou can re-query this item dynamically using the 'Refresh API' action.",
+    "url": "https://github.com/apache/iceberg-python/discussions/3118",
+    "incoming": [],
+    "outgoing": [
+      "2159",
+      "2943"
+    ]
+  },
+  {
+    "number": "3049",
+    "title": "Add concurrency safety validation checks",
+    "type": "pr",
+    "state": "merged",
+    "stateReason": null,
+    "binding": "python",
+    "author": "gabeiglio",
+    "body": "<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- In the case this PR will resolve an issue, please replace ${GITHUB_ISSUE_ID} below with the actual Github issue id. -->\r\nCloses #1930 \r\nCloses #1931 \r\n\r\n# Rationale for this change\r\n\r\nNow that we have an implementation of DeleteFileIndex we can move ahead and implement the last two safety concurrency validations mentioned in this #819 \r\n\r\n## Are these changes tested?\r\n\r\nYes\r\n\r\n## Are there any user-facing changes?\r\n\r\nNo\r\n\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n",
+    "url": "https://github.com/apache/iceberg-python/pull/3049",
+    "incoming": [
+      "3319",
+      "3320"
+    ],
+    "outgoing": [
+      "1930",
+      "819",
+      "1931"
+    ]
+  },
+  {
+    "number": "2943",
+    "title": "Optimize upsert performance for large datasets",
+    "type": "pr",
+    "state": "closed",
+    "stateReason": null,
+    "binding": "python",
+    "author": "EnyMan",
+    "body": "## Summary\r\n\r\nThis PR improves the performance of the `upsert()` operation, particularly for large upserts with 10,000+ rows. The changes address three main bottlenecks in the current implementation.\r\n\r\n## Problem\r\n\r\nThe current upsert implementation has several performance issues that become significant with large datasets:\r\n\r\n1. **Expensive match filter generation**: For composite keys, `create_match_filter()` generates `Or(And(EqualTo, EqualTo), ...)` expressions - one `And` clause per unique key combination. With 10k+ rows, this creates big expression trees that are slow to evaluate, up to n*m leaves for a single key column.\r\n\r\n2. **Per-batch insert filtering**: The insert logic filters rows using expression evaluation (`expression_to_pyarrow`) on each batch, which is inefficient and doesn't leverage PyArrow's join capabilities.\r\n\r\n3. **Row-by-row comparison**: `get_rows_to_update()` uses Python loops to compare rows one at a time (`source_table.slice(source_idx, 1)`), missing the opportunity for vectorized operations.\r\n\r\n## Solution\r\n\r\n### 1. Coarse Match Filter for Initial Scan (Biggest Performance Win)\r\n\r\nAdded `create_coarse_match_filter()` that generates a less precise but much faster filter for the initial table scan. **This is where the majority of the performance improvement comes from.**\r\n\r\n- For small datasets (< 10,000 unique keys): Uses `And(In(col1, values), In(col2, values))` instead of exact key-tuple matching\r\n- For large datasets with dense numeric keys (>10% density): Uses range filters (`col >= min AND col <= max`)\r\n- For large datasets with sparse keys: Returns `AlwaysTrue()` to allow full scan (exact matching happens downstream anyway)\r\n\r\nThis is safe because exact key matching occurs in `get_rows_to_update()` via the join operation.\r\n\r\n**Key insight - `AlwaysTrue()` is where the biggest win happens:**\r\n\r\nThe benchmark data was sparse, triggering the `AlwaysTrue()` path. Counter-intuitively, this is actually the **best case** for performance improvement. The speedup doesn't come from reading fewer files - it comes from **avoiding the massive expression tree construction and evaluation**:\r\n\r\n- Original: Build `Or(And(...), And(...), ...)` with millions of nodes (8s), then evaluate during scan (382s)\r\n- Optimized: Return `AlwaysTrue()` instantly (0.07s), scan without filter overhead (1.4s)\r\n\r\nWith sparse data, you'd read most/all files anyway, so the \"full scan\" isn't a penalty - but avoiding an expression tree with n×m nodes (n keys × m columns) and evaluating it across f files is a huge win.\r\n\r\n**When this optimization helps less:**\r\n- Small datasets (< 10k keys): Already fast with In() predicates, minimal improvement\r\n- Dense numeric keys: Range filter helps, but less dramatic than the sparse case\r\n- Workloads where the original filter already performed well\r\n\r\n### 2. Anti-Join for Insert Filtering\r\n\r\nReplaced per-batch expression filtering with a single anti-join operation after processing all batches:\r\n\r\n```python\r\n# Before: Per-batch expression filtering (slow)\r\nfor batch in matched_iceberg_record_batches:\r\n    expr_match = create_match_filter(rows, join_cols)\r\n    expr_match_arrow = expression_to_pyarrow(bind(...))\r\n    rows_to_insert = rows_to_insert.filter(~expr_match_arrow)\r\n\r\n# After: Single anti-join (fast)\r\ncombined_matched_keys = pa.concat_tables(matched_target_keys).group_by(join_cols).aggregate([])\r\nrows_to_insert = df_keys.join(combined_matched_keys, keys=join_cols, join_type=\"left anti\")\r\n```\r\n\r\n**Note on memory usage:** The new approach accumulates matched keys in memory during batch processing. We only store key columns (not full rows) to minimize memory footprint, and deduplicate after the loop. For tables with millions of matching rows, this could increase peak memory usage compared to the previous approach. A potential future improvement would be incremental deduplication during the loop.\r\n\r\n### 3. Vectorized Row Comparison\r\n\r\nReplaced row-by-row Python comparison with vectorized PyArrow operations:\r\n\r\n```python\r\n# Before: Python loop with slice()\r\nfor source_idx, target_idx in zip(...):\r\n    source_row = source_table.slice(source_idx, 1)\r\n    target_row = target_table.slice(target_idx, 1)\r\n    for key in non_key_cols:\r\n        if source_row.column(key)[0].as_py() != target_row.column(key)[0].as_py():\r\n            to_update_indices.append(source_idx)\r\n\r\n# After: Vectorized with take() and compute\r\nmatched_source = source_table.take(source_indices)\r\nmatched_target = target_table.take(target_indices)\r\nfor col in non_key_cols:\r\n    col_diff = _compare_columns_vectorized(source_col, target_col)\r\n    diff_masks.append(col_diff)\r\ncombined_mask = functools.reduce(pc.or_, diff_masks)\r\n```\r\n\r\nThe `_compare_columns_vectorized()` function handles:\r\n- Primitive types: Uses `pc.not_equal()` with proper null handling\r\n- Struct types: Recursively compares each nested field\r\n- List/Map types: Falls back to Python comparison (still batched)\r\n\r\n## Benchmark Results\r\n\r\nRan benchmarks on a table with ~2M rows, doing incremental upserts:\r\n\r\n| Run | Table Size | Batches | Original | Optimized | Speedup |\r\n|-----|------------|---------|----------|-----------|---------|\r\n| 2   | 2M rows    | 32      | 11.9 min | 2.3 min   | **5.1x** |\r\n| 3   | 2M rows    | 96      | 31.5 min | 3.9 min   | **8.0x** |\r\n| 4   | 2M rows    | 160+    | 51.2 min | 5.5 min   | **9.3x** |\r\n\r\n**Why times increase with each run:** The table uses bucketing, and each upsert modifies files independently, causing file count to increase over time. The original implementation's big filter expression (`Or(And(...), ...)`) had to be evaluated against **every file**, so more files = dramatically more time. The optimized version avoids this by using `AlwaysTrue()`, making the scan time grow linearly with data size rather than exponentially with file count.\r\n\r\nThis file increase could be mitigated with table maintenance (compaction), which is not yet implemented in PyIceberg.\r\n\r\n### Where the Time Went (Run 2: 2M rows, 32 batches)\r\n\r\n| Step | Original | Optimized |\r\n|------|----------|-----------|\r\n| Filter creation | 7.9s | 0.07s (114x faster) |\r\n| Table scan | 382.2s | 1.4s (273x faster) |\r\n| Batch processing | 212.0s | 24.5s |\r\n| Insert filtering | (included above) | 0.2s |\r\n\r\nThe coarse filter approach shows the biggest improvement:\r\n- Original filter complexity: `Or(And(...), And(...), ...)` with millions of nodes\r\n- Optimized filter: `AlwaysTrue()` or simple `And(In(), In())`\r\n\r\n## Incremental Adoption\r\n\r\nIf the anti-join change is concerning due to memory implications, the coarse match filter optimization can be contributed separately as it provides the majority of the performance benefit and doesn't change the memory characteristics.\r\n\r\n**Suggested PR split:**\r\n1. **Coarse match filter for initial scan** (biggest win, minimal risk)\r\n2. Vectorized row comparison in `get_rows_to_update()`\r\n3. Anti-join for insert filtering\r\n\r\n## Future Considerations\r\n\r\n**Why Rust bindings weren't explored for this PR:**\r\n\r\nIn ticket #2159, a suggestion was made to side-step performance issues by using the Python binding of the rust implementation. However, we would like to stick with a Python-centric implementation, because our use case requires mocking datetime using `time-machine` for:\r\n- Creating historical backfills with accurate snapshot timestamps\r\n- Deterministically rerunning failed pipeline runs with the same timestamps\r\n\r\nThis is why I kept the implementation in pure Python rather than exploring Rust bindings.\r\n\r\n**Potential hybrid approach:**\r\n\r\nThe data processing (filtering, joins, comparisons) is where most of the time is spent and could benefit from Rust bindings. However - and I'll be selfish here - snapshot creation and metadata operations should remain in Python to preserve the ability to mock time. Without this, our backfill and replay workflows would break.\r\n\r\nA future optimization could:\r\n- Move scan filtering and row comparison to Rust for performance\r\n- Keep snapshot/commit operations in Python for datetime mocking flexibility\r\n\r\nI'd happily trade some performance for keeping our time-mocking capability intact.\r\n\r\n## Testing\r\n\r\nAdded comprehensive tests for:\r\n- `create_coarse_match_filter()` behavior across different dataset sizes and types\r\n- Threshold boundary conditions (< 10k, = 10k, > 10k unique keys)\r\n- Density calculations for range filter decisions\r\n- `_compare_columns_vectorized()` with primitives, nulls, structs, nested structs, and lists\r\n- Edge cases: empty datasets, single values, negative numbers, composite keys\r\n\r\n## Breaking Changes\r\n\r\nNone. The API remains unchanged; this is purely an internal optimization.\r\n\r\n## Files Changed\r\n\r\n- `pyiceberg/table/__init__.py` - upsert method optimizations\r\n- `pyiceberg/table/upsert_util.py` - new `create_coarse_match_filter()`, vectorized comparison functions\r\n- `tests/table/test_upsert.py` - new tests for optimization functions\r\n\r\n---\r\n\r\n**Note:** This code was co-written with the help of an AI agent (Claude), primarily to speed up exploration and understanding of the PyIceberg codebase. All the speed up ideas are mine. The benchmark results are from our real-world production data that we actively use and store. I have reviewed all the generated code. All related tests pass.\r\n\r\n",
+    "url": "https://github.com/apache/iceberg-python/pull/2943",
+    "incoming": [
+      "3129",
+      "3118"
+    ],
+    "outgoing": [
+      "2159",
+      "3129"
+    ]
+  },
+  {
+    "number": "2822",
+    "title": "Write Deletion Vectors",
+    "type": "pr",
+    "state": "closed",
+    "stateReason": null,
+    "binding": "python",
+    "author": "rambleraptor",
+    "body": "<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- In the case this PR will resolve an issue, please replace ${GITHUB_ISSUE_ID} below with the actual Github issue id. -->\r\nPart of #2261\r\n\r\n# Rationale for this change\r\nThis adds a PuffinWriter for writing deletion vectors.\r\n\r\nRight now, it's just the writer class + some round trip tests (where we read + write the same file) to sanity check that the PuffinWriter works as expected. Writing Puffin files is very complex, so I wanted to make sure we all agreed on the writing semantics before using this elsewhere.\r\n\r\nLet me know your thoughts on this (or if it's too granular)\r\n\r\n## Are these changes tested?\r\nUnit tests included\r\n\r\n## Are there any user-facing changes?\r\n\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n",
+    "url": "https://github.com/apache/iceberg-python/pull/2822",
+    "incoming": [],
+    "outgoing": [
+      "2261"
+    ]
+  },
+  {
+    "number": "2634",
+    "title": "Incremental Append Scan",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "smaheshwar-pltr",
+    "body": "### Feature Request / Improvement\n\nRelated is #240 for Incremental Changelog Scan support. This issue tracks Incremental Append Scan support for PyIceberg.\n\nPyIceberg lacks incremental read utilities. It's been asked for multiple times - a strength of PyIceberg is that small data, such as _just data appended between two snapshots_, can be processed theoretically much faster than e.g. Spark.\n\nThis is an _incremental append scan_, that the [Java API](https://iceberg.apache.org/javadoc/latest/org/apache/iceberg/IncrementalAppendScan.html) and [the Spark engine](https://iceberg.apache.org/docs/latest/spark-queries/#incremental-read) support.",
+    "url": "https://github.com/apache/iceberg-python/issues/2634",
+    "incoming": [
+      "3364"
+    ],
+    "outgoing": [
+      "240"
+    ]
+  },
+  {
+    "number": "2261",
+    "title": "Iceberg Deletion Vector Write Support",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "bot",
+    "binding": "python",
+    "author": "yingjianwu98",
+    "body": "### Feature Request / Improvement\n\nThis is an issue to track the progress on supporting py-iceberg deletion vector write implementation.",
+    "url": "https://github.com/apache/iceberg-python/issues/2261",
+    "incoming": [
+      "2822"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "2159",
+    "title": "Upserting large table extremely slow",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "Anton-Tarazi",
+    "body": "### Feature Request / Improvement\n\n## Feature Request / Improvement\n\nUpserting large dataframes (tens of millions of rows) in un-usably slow due to creating a massive `BooleanExpression` in `upsert_util.create_match_filter`. This is before any IO is even started. It would be nice if upserts could support large tables.\n\nI'd be happy to work on this issue. \n",
+    "url": "https://github.com/apache/iceberg-python/issues/2159",
+    "incoming": [
+      "3129",
+      "2943",
+      "3118"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "2143",
+    "title": "refactor: consolidate snapshot expiration into MaintenanceTable",
+    "type": "pr",
+    "state": "merged",
+    "stateReason": null,
+    "binding": "python",
+    "author": "ForeverAngry",
+    "body": "<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- Closes #2150 -->\r\n\r\n# Rationale for this change\r\n\r\n- Consolidates snapshot expiration functionality from the standalone `ExpireSnapshots` class into the `MaintenanceTable` class for a unified maintenance API.\r\n- Resolves planned work left over from #1880, and closes https://github.com/apache/iceberg-python/issues/2142\r\n- Achieves feature and API parity with the Java implementation for snapshot retention and table maintenance.\r\n\r\n# Features & Enhancements\r\n\r\n- Introduces `table.maintenance.expire_snapshots()` as the unified entry point for snapshot expiration and future maintenance operations.\r\n- Retains the existing `ExpireSnapshots` implementation internally. The `expire_snapshots()` method on `MaintenanceTable` now returns an `ExpireSnapshots` object, preserving transaction semantics and supporting context manager usage:\r\n  ```python\r\n  with table.maintenance.expire_snapshots() as expire_snapshots:\r\n      expire_snapshots.by_id(1)\r\n      expire_snapshots.by_id(2)\r\n  ```\r\n- Focuses this PR on refactoring and documentation improvements, while maintaining compatibility with the prior `ExpireSnapshots` interface.\r\n- Sets a foundation for future expansion of the `MaintenanceTable` abstraction to encapsulate additional maintenance operations.\r\n\r\n\r\n# Bug Fixes & Cleanups\r\n\r\n- **ManageSnapshots Cleanup ([#2151](https://github.com/apache/iceberg-python/issues/2151))**\r\n  - Removes an unrelated instance variable from the `ManageSnapshots` class, aligning with the Java reference implementation.\r\n\r\n# Testing & Documentation\r\n\r\n- **Testing:**\r\n  - Tested the new API interface including:\r\n    - Expiration by ID \r\n    - Protection of branch/tag snapshots\r\n- **Documentation:**\r\n  - Added and updated documentation to describe:\r\n    - API usage examples\r\n\r\nPreview:\r\n<img width=\"1686\" height=\"1015\" alt=\"Screenshot 2025-08-11 at 1 37 04 PM\" src=\"https://github.com/user-attachments/assets/f469f3fc-b4b1-4ec9-b1ca-b9185e22643e\" />\r\n\r\n\r\n# Are these changes tested?\r\n\r\nYes. All changes are tested.~, with this PR predicated on the final changes from #1200.~ This work builds on the framework introduced by @jayceslesar in #1200 for the `MaintenanceTable`.\r\n\r\n# Are there any user-facing changes?\r\n\r\n---\r\n\r\n**Closes:**  \r\n- Closes #2151\r\n- Closes #2142 \r\n",
+    "url": "https://github.com/apache/iceberg-python/pull/2143",
+    "incoming": [],
+    "outgoing": [
+      "1880",
+      "2142",
+      "1200"
+    ]
+  },
+  {
+    "number": "2142",
+    "title": "refactor: consolidate snapshot expiration into MaintenanceTable",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "completed",
+    "binding": "python",
+    "author": "ForeverAngry",
+    "body": "### Feature Request / Improvement\n\nThis issue tracks to the work planned and left over from #1880.  It depends on, and stacks onto the work done in #1200.",
+    "url": "https://github.com/apache/iceberg-python/issues/2142",
+    "incoming": [
+      "2143"
+    ],
+    "outgoing": [
+      "1880",
+      "1200"
+    ]
+  },
+  {
+    "number": "2050",
+    "title": "validate added data files for snapshot compatibility",
+    "type": "pr",
+    "state": "merged",
+    "stateReason": null,
+    "binding": "python",
+    "author": "kaushiksrini",
+    "body": "<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- In the case this PR will resolve an issue, please replace ${GITHUB_ISSUE_ID} below with the actual Github issue id. -->\r\n<!-- Closes #${GITHUB_ISSUE_ID} -->\r\n\r\nCloses #1929\r\n\r\n# Rationale for this change\r\n\r\n- Since we want to support snapshot write compatibility (#1772) and is part of the following parent issue #819\r\n\r\n# Are these changes tested?\r\n\r\nYes\r\n\r\n# Are there any user-facing changes?\r\n\r\nNo\r\n\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n",
+    "url": "https://github.com/apache/iceberg-python/pull/2050",
+    "incoming": [
+      "3319",
+      "3320"
+    ],
+    "outgoing": [
+      "819",
+      "1929"
+    ]
   },
   {
     "number": "1958",
@@ -41,17 +361,100 @@
     ]
   },
   {
-    "number": "1200",
-    "title": "Delete orphan files",
-    "type": "issue",
-    "state": "open",
+    "number": "1938",
+    "title": "feat: `validate_deleted_data_files`",
+    "type": "pr",
+    "state": "merged",
     "stateReason": null,
     "binding": "python",
-    "author": "sungwy",
-    "body": "Introduce a new API to delete orphan files for a given table\r\n\r\nFeature reference: https://iceberg.apache.org/docs/1.5.1/maintenance/#delete-orphan-files",
-    "url": "https://github.com/apache/iceberg-python/issues/1200",
+    "author": "jayceslesar",
+    "body": "Closes #1928 \r\n\r\n# Rationale for this change\r\nAdd `validate_deleted_data_files` which depends on #1935 \r\n\r\n# Are these changes tested?\r\nAdded a test!\r\n\r\n# References\r\n\r\nJava `deletedDataFiles` impl:\r\nhttps://github.com/apache/iceberg/blob/3a29199e73f2e9ae0f8f92a1a0732a338c66aa0d/core/src/main/java/org/apache/iceberg/MergingSnapshotProducer.java#L678\r\n\r\nJava `ManifestGroup.entries` impl:\r\nhttps://github.com/apache/iceberg/blob/3a29199e73f2e9ae0f8f92a1a0732a338c66aa0d/core/src/main/java/org/apache/iceberg/ManifestGroup.java#L242",
+    "url": "https://github.com/apache/iceberg-python/pull/1938",
     "incoming": [
-      "1958"
+      "3319",
+      "3320"
+    ],
+    "outgoing": [
+      "1928",
+      "1935"
+    ]
+  },
+  {
+    "number": "1935",
+    "title": "feat: `validation_history` and `ancestors_between`",
+    "type": "pr",
+    "state": "merged",
+    "stateReason": null,
+    "binding": "python",
+    "author": "jayceslesar",
+    "body": "<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- In the case this PR will resolve an issue, please replace ${GITHUB_ISSUE_ID} below with the actual Github issue id. -->\r\n<!-- Closes #${GITHUB_ISSUE_ID} -->\r\n\r\n# Rationale for this change\r\nAdds `validation_history` that will be used in support of https://github.com/apache/iceberg-python/issues/819\r\n\r\nAlso adds `ancestors_between`.\r\n\r\nBased off of the java implementation but we will likely want changes that feel more like python :). Already took a few liberties there\r\n\r\n# Are these changes tested?\r\nAdded tests\r\n\r\n# References:\r\n\r\njava implementation of `validation_history`:\r\nhttps://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/MergingSnapshotProducer.java#L859\r\n\r\n\r\njava implementation of `ancestors_between`:\r\nhttps://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/util/SnapshotUtil.java#L213\r\n",
+    "url": "https://github.com/apache/iceberg-python/pull/1935",
+    "incoming": [
+      "1938",
+      "3319",
+      "3320"
+    ],
+    "outgoing": [
+      "819"
+    ]
+  },
+  {
+    "number": "1931",
+    "title": "Support Concurrency Safety Validation: Implement `validateNoNewDeletesForDataFiles`",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "completed",
+    "binding": "python",
+    "author": "sungwy",
+    "body": "There's been a lot of continued interest in using multiple PyIceberg applications concurrently and having proper support for optimistic concurrency.\n\nI think the best place to start is through the implementation of the individual validation functions\n\nThis subtask tracks the implementation of `validateNoNewDeletesForDataFiles` function. The [Java Reference can be found here](https://github.com/apache/iceberg/blob/9fc49e187069c7ec2493ac0abf20f73175b3df89/core/src/main/java/org/apache/iceberg/MergingSnapshotProducer.java#L501-L533)",
+    "url": "https://github.com/apache/iceberg-python/issues/1931",
+    "incoming": [
+      "3049"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "1930",
+    "title": "Support Concurrency Safety Validation: Implement `validateNoNewDeleteFiles`",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "completed",
+    "binding": "python",
+    "author": "sungwy",
+    "body": "There's been a lot of continued interest in using multiple PyIceberg applications concurrently and having proper support for optimistic concurrency.\n\nI think the best place to start is through the implementation of the individual validation functions\n\nThis subtask tracks the implementation of `validateNoNewDeleteFiles` function.\n\n [Java Reference](https://github.com/apache/iceberg/blob/9fc49e187069c7ec2493ac0abf20f73175b3df89/core/src/main/java/org/apache/iceberg/MergingSnapshotProducer.java#L544-L552)",
+    "url": "https://github.com/apache/iceberg-python/issues/1930",
+    "incoming": [
+      "3049"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "1929",
+    "title": "Support Concurrency Safety Validation: Implement `validateAddedDataFiles`",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "completed",
+    "binding": "python",
+    "author": "sungwy",
+    "body": "There's been a lot of continued interest in using multiple PyIceberg applications concurrently and having proper support for optimistic concurrency.\n\nI think the best place to start is through the implementation of the individual validation functions\n\nThis subtask tracks the implementation of `validateAddedDataFiles` function.\n\n[Java Reference](https://github.com/apache/iceberg/blob/9fc49e187069c7ec2493ac0abf20f73175b3df89/core/src/main/java/org/apache/iceberg/MergingSnapshotProducer.java#L345-L363) ",
+    "url": "https://github.com/apache/iceberg-python/issues/1929",
+    "incoming": [
+      "2050"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "1928",
+    "title": "Support Concurrency Safety Validation: Implement `validateDeletedDataFiles`",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "completed",
+    "binding": "python",
+    "author": "sungwy",
+    "body": "There's been a lot of continued interest in using multiple PyIceberg applications concurrently and having proper support for optimistic concurrency.\n\nI think the best place to start is through the implementation of the individual validation functions\n\nThis subtask tracks the implementation of `validateDeletedDataFiles` function. [The Java Reference implementation can be found here](https://github.com/apache/iceberg/blob/9fc49e187069c7ec2493ac0abf20f73175b3df89/core/src/main/java/org/apache/iceberg/MergingSnapshotProducer.java#L618-L636)",
+    "url": "https://github.com/apache/iceberg-python/issues/1928",
+    "incoming": [
+      "1938"
     ],
     "outgoing": []
   },
@@ -64,10 +467,234 @@
     "author": "ForeverAngry",
     "body": "\r\n\r\n\r\n\r\n## Summary\r\n\r\nThis PR Closes issue #516 by implementing support for the `ExpireSnapshot` table metadata action.\r\n\r\n## Rationale\r\n\r\nThe `ExpireSnapshot` action is a core part of Iceberg’s table maintenance APIs. Adding support for this action in PyIceberg helps ensure feature parity with other language implementations (e.g., Java) and supports users who want to programmatically manage snapshot retention using PyIceberg’s public API.\r\n\r\n## Testing\r\n\r\n- Unit tests have been added to cover the initial expected usage paths.\r\n- Additional feedback on edge cases, missing test scenarios or corrections to the setup test logic is greatly welcome during the review process.\r\n\r\n## User-facing changes\r\n\r\n- This change introduces a new public API: `ExpireSnapshot`.\r\n- No breaking changes or modifications to existing APIs were made.\r\n\r\n---",
     "url": "https://github.com/apache/iceberg-python/pull/1880",
-    "incoming": [],
+    "incoming": [
+      "2142",
+      "2143"
+    ],
     "outgoing": [
       "516"
     ]
+  },
+  {
+    "number": "1818",
+    "title": "V3 Tracking issue",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "Fokko",
+    "body": "Tracks the progress of the V3 implementation\n\n- [ ] New DataTypes\n  - [x] **UnknownType**: Added in https://github.com/apache/iceberg-python/pull/1681\n  - [x] **Timestamp(Tz)NanoType**: Introduced in https://github.com/apache/iceberg-python/pull/1632\n  - [ ] **VariantType**: https://github.com/apache/iceberg-python/issues/1819\n  - [ ] **Geometry**/**Geography**: https://github.com/apache/iceberg-python/issues/1820\n- [ ] Default value:\n  - [x] https://github.com/apache/iceberg-python/issues/1836 / https://github.com/apache/iceberg-python/pull/1644\n  - [x] https://github.com/apache/iceberg-python/pull/1770\n  - [x] Prerequisite: https://github.com/apache/iceberg-python/pull/1805\n- [x] Multi-arg transforms\n  - Reading of the metadata has been added in https://github.com/apache/iceberg-python/pull/1554\n  - Supporting multi-arg transforms still needs to happen\n- [x] Row-level lineage\n  -  https://github.com/apache/iceberg-python/issues/1821\n- [ ] Deletion vectors\n  - [x] Read support is being added in https://github.com/apache/iceberg-python/pull/1516\n  - [ ] Write support",
+    "url": "https://github.com/apache/iceberg-python/issues/1818",
+    "incoming": [],
+    "outgoing": []
+  },
+  {
+    "number": "1808",
+    "title": "Support producing positional deletes",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "bot",
+    "binding": "python",
+    "author": "Fokko",
+    "body": "### Apache Iceberg version\n\nNone\n\n### Please describe the bug 🐞\n\nI think it would be great to add support for positional deletes for V2. With Java a lot of learnings have been learned, such as producing a positional delete file per data file. This greatly simplifies the implementation for PyIceberg.\n\n### Willingness to contribute\n\n- [ ] I can contribute a fix for this bug independently\n- [ ] I would be willing to contribute a fix for this bug with guidance from the Iceberg community\n- [x] I cannot contribute a fix for this bug at this time",
+    "url": "https://github.com/apache/iceberg-python/issues/1808",
+    "incoming": [],
+    "outgoing": []
+  },
+  {
+    "number": "1751",
+    "title": "[Feature] Add Support for Distributed Write",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "andormarkus",
+    "body": "### Feature Request / Improvement\n\n## Problem Statement\nA key problem in distributed Iceberg systems is that commit processes can block each other when multiple workers try to update table metadata simultaneously. This blocking creates a severe performance bottleneck that limits throughput, particularly in high-volume ingestion scenarios.\n\n## Use Case\nIn our distributed architecture:\n1. Process A writes Parquet files in Iceberg-compatible format\n2. Simple string identifiers (file paths) need to be passed between systems\n3. Process B takes these strings and commits the files to make them visible in queries\n\nThis pattern is especially useful for high-concurrency ingestion scenarios where multiple writers could be writing data to an Iceberg table simultaneously, but we want to centralize and coordinate the commit process. This approach is critical because in distributed environments, commit processes can block each other, creating a significant bottleneck in high-throughput scenarios.\n\n### Detailed Workflow\nOur workflow involves:\n\n```python\n# Process A: Write data but don't commit\ntable = catalog.load_table(identifier=\"iceberg.table\")\ndata_files = list(pyiceberg.io.pyarrow._dataframe_to_data_files(\n        table_metadata=table.metadata, write_uuid=uuid.uuid4(), df=pa_df, io=table.io\n    )\n)\n\nqueue.send(data_files)  # Send data_files strings to queue system\n\n# Process B: Commit processor (runs separately)\ndata_files = queue.receive()\nwith table.transaction() as trx:\n    with trx.update_snapshot().fast_append() as update_snapshot:\n        for data_file in data_files:\n            update_snapshot.append_data_file(data_file)\n```\n\nThis separation of write and commit operations provides several advantages:\n- Improved throughput by parallelizing write operations across multiple workers\n- Reduced lock contention since metadata commits (which require locks) are centralized\n- Better failure handling - failed writes don't impact the table state\n- Controlled transaction timing - commits can be batched or scheduled optimally\n- Elimination of commit process blocking - by centralizing commits, we prevent distributed writers from blocking each other during metadata updates, which is a major performance bottleneck\n\n## Current Limitations\n- Serializing `DataFile` objects between processes is challenging\n- We've attempted custom serialization with compression (gzip, zlib), which is working however required long complex code\n- Using `jsonpickle` also presented significant problems\n\n\n## Proposed Solution\nWe're seeking a robust way to handle distributed writes, potentially with:\n\n1. Add serialization/deserialization methods to the `DataFile` class\n2. Support Avro for efficient serialization of `DataFile` objects (potentially smaller than other approaches)\n3. Better integration with `append_data_file` API\n4. OR a more accessible way to use the ManifestFile functionality that's already implemented in PyIceberg\n\nIdeally, the solution would:\n- Handle schema evolution gracefully (unlike current `add_files` approach which has issues when schema changes)\n- Work efficiently with minimal overhead for large-scale concurrent processing\n- Provide simple primitives that can be used in distributed systems without requiring complex serialization\n- Follow patterns similar to those used in the Java implementation where appropriate\n\n## Alternative Approaches Tried\n- We've implemented a custom serialization/deserialization function with compression\n- We explored the approach in #1678, but found it created too many commits and became a performance bottleneck\n\n## Related PRs/Issues\n- PR #1742 (closed): Original attempt at write_parquet API\n- Issue #1737 (closed): Feature request for Table-Compatible Parquet Files \n- Issue #1678: Related implementation suggestion\n\nWe're looking for guidance on the best approach to solve this distributed writing pattern while maintaining performance and schema compatibility.",
+    "url": "https://github.com/apache/iceberg-python/issues/1751",
+    "incoming": [],
+    "outgoing": []
+  },
+  {
+    "number": "1661",
+    "title": "Rewrite manifests ",
+    "type": "pr",
+    "state": "closed",
+    "stateReason": null,
+    "binding": "python",
+    "author": "amitgilad3",
+    "body": "This is an initial implementation of rewrite manifests, aiming to mimic the Java implementation as closely as possible. I’ve tried to follow the same structure and logic, but there are still some areas that might need refinement.\r\n\r\nI’m looking for feedback and suggestions on:\r\n\t•\tWhether the approach aligns well with the existing design.\r\n\t•\tAny gaps or optimizations that could improve performance.\r\n\t•\tHow best to proceed with completing this feature.\r\n\r\nWould love any insights or guidance on the next steps! Thanks in advance for the review! 🙌",
+    "url": "https://github.com/apache/iceberg-python/pull/1661",
+    "incoming": [],
+    "outgoing": [
+      "270"
+    ]
+  },
+  {
+    "number": "1607",
+    "title": "Implement `write.metadata.delete-after-commit.enabled` to clean up old metadata files",
+    "type": "pr",
+    "state": "merged",
+    "stateReason": null,
+    "binding": "python",
+    "author": "kaushiksrini",
+    "body": "Implements property `write.metadata.delete-after-commit.enabled` from https://iceberg.apache.org/docs/1.5.1/maintenance/#remove-old-metadata-files.\r\n\r\nCloses #1199 ",
+    "url": "https://github.com/apache/iceberg-python/pull/1607",
+    "incoming": [],
+    "outgoing": [
+      "1199"
+    ]
+  },
+  {
+    "number": "1549",
+    "title": "Support Deletion Vectors",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "completed",
+    "binding": "python",
+    "author": "Fokko",
+    "body": "### Feature Request / Improvement\n\nPart of Iceberg V3",
+    "url": "https://github.com/apache/iceberg-python/issues/1549",
+    "incoming": [
+      "1516"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "1516",
+    "title": "Deletion Vectors read support",
+    "type": "pr",
+    "state": "merged",
+    "stateReason": null,
+    "binding": "python",
+    "author": "Fokko",
+    "body": "First see if we can produce some deletion vectors.\r\n\r\nResolves #1549 ",
+    "url": "https://github.com/apache/iceberg-python/pull/1516",
+    "incoming": [],
+    "outgoing": [
+      "1549"
+    ]
+  },
+  {
+    "number": "1200",
+    "title": "Delete orphan files",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "sungwy",
+    "body": "Introduce a new API to delete orphan files for a given table\r\n\r\nFeature reference: https://iceberg.apache.org/docs/1.5.1/maintenance/#delete-orphan-files",
+    "url": "https://github.com/apache/iceberg-python/issues/1200",
+    "incoming": [
+      "1958",
+      "1065",
+      "31",
+      "2142",
+      "2143"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "1199",
+    "title": "Remove old metadata files",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "completed",
+    "binding": "python",
+    "author": "sungwy",
+    "body": "Support `write.metadata.delete-after-commit.enabled` and `write.metadata.previous-versions-max` table properties and automatically delete old metadata files on commit\r\n\r\nFeature reference: https://iceberg.apache.org/docs/1.5.1/maintenance/#remove-old-metadata-files",
+    "url": "https://github.com/apache/iceberg-python/issues/1199",
+    "incoming": [
+      "1607",
+      "1065",
+      "31"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "1092",
+    "title": "Support data files compaction",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "sungwy",
+    "body": "Introduce an API to compact data files. The first version of the API will do the following:\r\n- take a predicate expression as input parameter to find data files matching the filter that will be re-written\r\n- group data files by partitions and rewrite them using the same bin-packing constraints of the writer\r\n",
+    "url": "https://github.com/apache/iceberg-python/issues/1092",
+    "incoming": [
+      "3124",
+      "3130",
+      "3131",
+      "1065",
+      "31"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "1078",
+    "title": "[Feat] Support Merge-on-Read mode for Deletes",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "sungwy",
+    "body": "### Feature Request / Improvement\n\nSimilar to Spark, we would like to implement Merge-on-Read mode of deleting, by creating delete files that encode position and equality delete markers that can be applied within a given partition.\r\n\r\nhttps://iceberg.apache.org/spec/?h=delete+files#row-level-deletes",
+    "url": "https://github.com/apache/iceberg-python/issues/1078",
+    "incoming": [],
+    "outgoing": []
+  },
+  {
+    "number": "1065",
+    "title": "[feat] Table maintenance tasks",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "bot",
+    "binding": "python",
+    "author": "kevinjqliu",
+    "body": "### Feature Request / Improvement\r\n\r\nhttps://iceberg.apache.org/docs/latest/maintenance/\r\nPotentially dupe of #31\r\n\r\nRecommended Maintenance\r\n- [ ] Expire Snapshots (https://github.com/apache/iceberg-python/issues/516)\r\n- [x] #1199\r\n- [ ] #1200\r\n\r\nOptional Maintenance\r\n- [ ] #1092\r\n- [ ] Rewrite manifests (Related #270)\r\n\r\nCurrently tagged as 0.8.0 release, since it was mentioned in #736",
+    "url": "https://github.com/apache/iceberg-python/issues/1065",
+    "incoming": [],
+    "outgoing": [
+      "736",
+      "1199",
+      "270",
+      "1092",
+      "31",
+      "1200"
+    ]
+  },
+  {
+    "number": "819",
+    "title": "Support IsolationLevels and Concurrency Safety Validation Checks",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "sungwy",
+    "body": "### Feature Request / Improvement\n\nSupport enforcing Isolation Levels from specified snapshot ID \n\nhttps://iceberg.apache.org/docs/latest/spark-configuration/#write-options\n\nThere's been a lot of continued interest in using multiple PyIceberg applications concurrently and having proper support for optimistic concurrency.\n\nI think the best place to start is through the implementation of the individual validation functions\n\n\nOnce this is complete, we'll be able to introduce the Isolation Levels and correctly implement the validation logic in the _OverwriteFiles snapshot producer, similarly to the [Java implementation](https://github.com/apache/iceberg/blob/9fc49e187069c7ec2493ac0abf20f73175b3df89/core/src/main/java/org/apache/iceberg/BaseOverwriteFiles.java#L121-L164)",
+    "url": "https://github.com/apache/iceberg-python/issues/819",
+    "incoming": [
+      "1935",
+      "2050",
+      "3049",
+      "3319",
+      "3320"
+    ],
+    "outgoing": []
+  },
+  {
+    "number": "736",
+    "title": "PyIceberg Near-Term Roadmap",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "completed",
+    "binding": "python",
+    "author": "kevinjqliu",
+    "body": "### Feature Request / Improvement\n\n# PyIceberg 0.7.0\n\nThe main objective of 0.7.0 is to have partitioned writes (non-exhaustive list :)\n\n- [x] Support for merge-into / upsert: https://github.com/apache/iceberg-python/issues/402\n  - [x] Support partitioned appends: https://github.com/apache/iceberg-python/pull/784\n  - [x] Support partial deletes: https://github.com/apache/iceberg-python/pull/569\n- [x] Support for parallelizing writes: https://github.com/apache/iceberg-python/issues/428 https://github.com/apache/iceberg-python/issues/346\n  - [x] Support parallelized writes: https://github.com/apache/iceberg-python/pull/444\n- [x] Support `table_exists` on catalog: https://github.com/apache/iceberg-python/issues/406 https://github.com/apache/iceberg-python/issues/507, fixed in https://github.com/apache/iceberg-python/pull/512\n- [x] Metadata tables: https://github.com/apache/iceberg-python/issues/511\n  - [x] *Files* assigned to @Gowthami03B, PR in https://github.com/apache/iceberg-python/pull/614\n  - [x] *Snapshots* assigned to @Fokko in https://github.com/apache/iceberg-python/pull/524/\n  - [x] *History* assigned to @ndrluis in https://github.com/apache/iceberg-python/pull/828\n  - [x] *Metadata log entries* @kevinjqliu (issue in https://github.com/apache/iceberg-python/issues/594): https://github.com/apache/iceberg-python/pull/667\n  - [x] *Manifests* @geruh: PR in https://github.com/apache/iceberg-python/pull/717\n  - [x] *Partitions* assigned to @syun64 (issue in https://github.com/apache/iceberg-python/issues/24): https://github.com/apache/iceberg-python/pull/603\n  - [x] *References* assigned to @geruh  in https://github.com/apache/iceberg-python/pull/602\n  - [x] *Entries* assigned to @Fokko in https://github.com/apache/iceberg-python/pull/551\n- [ ] Manifest read/write improvements:\n  - [ ] Implement rolling writes: https://github.com/apache/iceberg-python/issues/596 https://github.com/apache/iceberg-python/pull/650\n  - [ ] Caching of manifests: https://github.com/apache/iceberg-python/issues/595\n- [ ] Incremental append scan: https://github.com/apache/iceberg-python/pull/533\n\n# PyIceberg 0.8.0\n\n- [ ] Table maintenance:\n  - [ ] Snapshot expiration\n  - [ ] Metadata rewrites\n  - [ ] Compaction\n  - [ ] Delete orphan files \n- [ ] Catalogs:\n  - [ ] Snowflake catalog: https://github.com/apache/iceberg-python/pull/687\n  - [x] Nessie catalog: https://github.com/apache/iceberg-python/issues/19\n  - [ ] BigLake catalog: https://github.com/apache/iceberg-python/issues/651\n- [ ] ORC Support: https://github.com/apache/iceberg-python/issues/20\n- [ ] Branch Support: https://github.com/apache/iceberg-python/issues/306\n- [x] Tag Support: https://github.com/apache/iceberg-python/issues/573. PR: https://github.com/apache/iceberg-python/pull/603\n- [ ] Write with Sort Order https://github.com/apache/iceberg-python/issues/271\n- [ ] Support deletes with Merge-on-read: https://github.com/apache/iceberg-python/issues/1078\n- [ ] Support writes to Bucket Partitioned Tables: https://github.com/apache/iceberg-python/issues/1074\n\n# PyIceberg 1.0.0\n\nLong-term goals:\n\n- Support Griffe to detect breaking API changes https://github.com/apache/iceberg-python/issues/334: https://github.com/apache/iceberg-python/pull/394\n- Implement Arrow dataset: https://github.com/apache/iceberg-python/issues/30\n- Support table maintenance operations: https://github.com/apache/iceberg-python/issues/31\n- Add [View](https://iceberg.apache.org/view-spec/) support\n- Add [Puffin](https://iceberg.apache.org/puffin-spec/) support\n- Support engine integrations \n  - [x] DuckDB\n  - [x] Daft (https://github.com/Eventual-Inc/Daft/issues/1877)\n  - [x] Polars (https://github.com/pola-rs/polars/pull/15018)\n  - [ ] Ray\n- [ ] Support Commit Retries: https://github.com/apache/iceberg-python/issues/269",
+    "url": "https://github.com/apache/iceberg-python/issues/736",
+    "incoming": [
+      "1065"
+    ],
+    "outgoing": []
   },
   {
     "number": "516",
@@ -80,64 +707,62 @@
     "body": "### Feature Request / Improvement\r\n\r\nSupport Maintenance operations on PyIceberg: https://iceberg.apache.org/docs/1.4.0/maintenance\r\n\r\nAll operations except for data file compaction are metadata-only or file system operations, so supporting them on PyIceberg may be a small lift",
     "url": "https://github.com/apache/iceberg-python/issues/516",
     "incoming": [
-      "1880"
+      "1880",
+      "31"
     ],
     "outgoing": []
   },
   {
-    "number": "3124",
-    "title": "feat: Add table.maintenance.compact() for full-table data file compaction",
-    "type": "pr",
-    "state": "open",
-    "binding": "python",
-    "author": "qzyu999",
-    "body": "Closes #1092\r\n\r\n# Rationale for this change\r\nThis introduces a simplified, whole-table compaction strategy via the MaintenanceTable API (`table.maintenance.compact()`).\r\n\r\nKey implementation details:\r\n- Reads the entire table state into memory via `.to_arrow()`.\r\n  - Note: This initial implementation uses an in-memory Arrow-based rewrite strategy. Future iterations can extend this to support streaming or distributed rewrites for larger-than-memory datasets.\r\n- Uses `table.overwrite()` to rewrite data, leveraging PyIceberg's target file bin-packing (`write.target-file-size-bytes`) natively.\r\n- Ensures atomicity by executing within a table transaction.\r\n- Explicitly sets `snapshot-type: replace` and `replace-operation: compaction` to ensure correct metadata history for downstream engines.\r\n- Includes a guard to safely ignore compaction requests on empty tables.\r\n\r\n## Are these changes tested?\r\nIncludes full Pytest coverage in `tests/table/test_maintenance.py`.\r\n\r\n## Are there any user-facing changes?\r\nYes. This PR adds a new compact() method to the TableMaintenance API, allowing users to perform file compaction on existing Iceberg tables.\r\n\r\nExample usage:\r\n```Python\r\ntable = catalog.load_table(\"default.my_table\")\r\n# Merges small files into larger ones based on table properties\r\ntable.maintenance.compact()\r\n```\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n\r\nEdit: It looks like I'm not able to add the changelog label, hopefully someone with permissions can do so.\r\n",
-    "url": "https://github.com/apache/iceberg-python/pull/3124",
-    "incoming": [],
-    "outgoing": [
-      "1092"
-    ]
-  },
-  {
-    "number": "1092",
-    "title": "Support data files compaction",
+    "number": "270",
+    "title": "Support metadata compaction",
     "type": "issue",
     "state": "open",
+    "stateReason": null,
     "binding": "python",
-    "author": "sungwy",
-    "body": "Introduce an API to compact data files. The first version of the API will do the following:\r\n- take a predicate expression as input parameter to find data files matching the filter that will be re-written\r\n- group data files by partitions and rewrite them using the same bin-packing constraints of the writer\r\n",
-    "url": "https://github.com/apache/iceberg-python/issues/1092",
+    "author": "Fokko",
+    "body": "### Feature Request / Improvement\n\nAdd support for compaction. This rewrites the existing manifests into a single one, reducing the number of calls to the object store. This should follow the Java configuration keys:\r\n\r\n- `commit.manifest-merge.enabled`: Controls whether to automatically merge manifests on writes.\r\n- `commit.manifest.min-count-to-merge`: Minimum number of manifests to accumulate before merging.\r\n- `commit.manifest.target-size-bytes`: Target size when merging manifest files.",
+    "url": "https://github.com/apache/iceberg-python/issues/270",
     "incoming": [
-      "3124"
+      "1661",
+      "1065",
+      "31"
     ],
     "outgoing": []
   },
   {
-    "number": "819",
-    "title": "Support IsolationLevels and Concurrency Safety Validation Checks",
+    "number": "240",
+    "title": "Incremental Changelog Scan",
     "type": "issue",
-    "state": "open",
+    "state": "closed",
+    "stateReason": "bot",
     "binding": "python",
-    "author": "sungwy",
-    "body": "### Feature Request / Improvement\n\nSupport enforcing Isolation Levels from specified snapshot ID \n\nhttps://iceberg.apache.org/docs/latest/spark-configuration/#write-options\n\nThere's been a lot of continued interest in using multiple PyIceberg applications concurrently and having proper support for optimistic concurrency.\n\nI think the best place to start is through the implementation of the individual validation functions\n\n\nOnce this is complete, we'll be able to introduce the Isolation Levels and correctly implement the validation logic in the _OverwriteFiles snapshot producer, similarly to the [Java implementation](https://github.com/apache/iceberg/blob/9fc49e187069c7ec2493ac0abf20f73175b3df89/core/src/main/java/org/apache/iceberg/BaseOverwriteFiles.java#L121-L164)",
-    "url": "https://github.com/apache/iceberg-python/issues/819",
+    "author": "stefan-pdx",
+    "body": "### Feature Request / Improvement\n\nHello, \r\n\r\nThe Java API supports performing a table scan for just the incremental changes between two snapshots: https://iceberg.apache.org/javadoc/latest/org/apache/iceberg/IncrementalChangelogScan.html\r\n\r\nHow feasible would it be to support the same in PyIceberg? Are there any special considerations to make?\r\n\r\nThanks!",
+    "url": "https://github.com/apache/iceberg-python/issues/240",
     "incoming": [
-      "3320"
+      "2634"
     ],
     "outgoing": []
   },
   {
-    "number": "3320",
-    "title": "Add commit retry and concurrency validation for writes",
-    "type": "pr",
-    "state": "open",
+    "number": "31",
+    "title": "Support to optimize, analyze tables and expire snapshots, remove orphan files",
+    "type": "issue",
+    "state": "closed",
+    "stateReason": "bot",
     "binding": "python",
-    "author": "lawofcycles",
-    "body": "Closes #3319\r\nCloses #819\r\nCloses #269\r\n\r\n# Rationale for this change\r\n\r\nPyIceberg currently fails immediately with `CommitFailedException` when a concurrent transaction commits first, regardless of whether the writes actually conflict. Java Iceberg handles this transparently through its retry loop in `SnapshotProducer.commit()`.\r\n\r\nThis PR adds automatic commit retry with exponential backoff and data conflict validation to PyIceberg, matching Java Iceberg's behavior. On `CommitFailedException`, the retry loop refreshes table metadata, re-runs validation, and regenerates manifests. If validation detects a real data conflict, the operation aborts with `ValidationException` instead of retrying.\r\n\r\nThe retry loop is placed in `Transaction.commit_transaction()` rather than in individual snapshot producers. This is necessary because `Transaction.delete()` uses two producers (`_DeleteFiles` + `_OverwriteFiles`) that must be committed atomically. Retrying at the producer level would break this atomicity.\r\n\r\nValidation behavior follows Java's `BaseOverwriteFiles.validate()`, using the existing validation functions from `validate.py` that were contributed through #1935, #1938, #2050, and #3049.\r\n\r\n## Are these changes tested?\r\nYes. Unit tests and integration tests covering retry success, `ValidationException` abort, retry exhaustion, isolation levels, partition-level conflict detection, manifest cleanup, and producer state reset.\r\n\r\n## Are there any user-facing changes?\r\nYes. Previously, all concurrent write conflicts resulted in `CommitFailedException`.\r\n\r\n Now:\r\n- Compatible concurrent writes (e.g. concurrent appends) are retried automatically and succeed transparently\r\n- Incompatible concurrent writes (e.g. concurrent deletes on the same data) raise `ValidationException` instead of `CommitFailedException`\r\n\r\nThe following new table properties are supported.\r\n- `commit.retry.num-retries` (default: 4)\r\n- `commit.retry.min-wait-ms` (default: 100)\r\n- `commit.retry.max-wait-ms` (default: 60000)\r\n- `write.delete.isolation-level` (default: serializable)\r\n- `write.update.isolation-level` (default: serializable)",
-    "url": "https://github.com/apache/iceberg-python/pull/3320",
-    "incoming": [],
+    "author": "Fokko",
+    "body": "### Feature Request / Improvement\n\nMigrated of https://github.com/apache/iceberg/issues/8183",
+    "url": "https://github.com/apache/iceberg-python/issues/31",
+    "incoming": [
+      "1065"
+    ],
     "outgoing": [
-      "819"
+      "1199",
+      "270",
+      "516",
+      "1092",
+      "1200"
     ]
   }
 ]
