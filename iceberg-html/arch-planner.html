@@ -113,7 +113,24 @@
             <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--slate);"></span>
             <span>Discussion</span>
           </div>
-          <div style="display: flex; align-items: center; gap: 6px; margin-top: 2px; border-top: 1px solid var(--g200); padding-top: 2px;">
+          
+          <div style="margin-top: 3px; border-top: 1px solid var(--g200); padding-top: 3px; display: flex; flex-direction: column; gap: 3px;">
+            <div style="font-weight: bold; color: var(--slate); margin-bottom: 1px;">Top-Left: GitHub State</div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #2ECC71;"></span>
+              <span>🟢 Open</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #9B59B6;"></span>
+              <span>🟣 Merged</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #E74C3C;"></span>
+              <span>🔴 Closed</span>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 6px; margin-top: 3px; border-top: 1px solid var(--g200); padding-top: 3px;">
             <span style="display: inline-block; width: 14px; height: 1.5px; background: var(--g300);"></span>
             <span>parsed reference arrow</span>
           </div>
@@ -557,6 +574,8 @@
           url: item.url,
           layer: layer,
           status: status,
+          state: item.state,
+          stateReason: item.stateReason || item.state_reason || null,
           dependsOn: dependsOn,
           customDependsOn: customDependsOn,
           ignoredDependsOn: ignoredDependsOn,
@@ -1237,6 +1256,26 @@
       circle.setAttribute("filter", isSelected ? "url(#glow)" : "none");
 
       g.appendChild(circle);
+
+      // GitHub State indicator dot
+      const stateColors = {
+        open: "#2ECC71",
+        merged: "#9B59B6",
+        closed: "#E74C3C"
+      };
+      const sDot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      sDot.setAttribute("cx", node.x - 14);
+      sDot.setAttribute("cy", node.y - 14);
+      sDot.setAttribute("r", "5.5");
+      sDot.setAttribute("fill", stateColors[node.state || "open"]);
+      sDot.setAttribute("stroke", "var(--paper)");
+      sDot.setAttribute("stroke-width", "1.5");
+      
+      const sDotTitle = document.createElementNS("http://www.w3.org/2000/svg", "title");
+      sDotTitle.textContent = `GitHub State: ${(node.state || "open").toUpperCase()}`;
+      sDot.appendChild(sDotTitle);
+      
+      g.appendChild(sDot);
 
       // Binding indicator dot
       const bindingColors = {
