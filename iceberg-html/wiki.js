@@ -71,7 +71,7 @@ async function getDataDirectoryHandle(create = false) {
 async function migrateRootFilesToSubfolder() {
   if (!window.wikiDirHandle) return;
   try {
-    const filesToMigrate = ["wiki-todo-state.json", "wiki-notes.json", "wiki-github-collection.json", "wiki-features.json"];
+    const filesToMigrate = ["wiki-todo-state.json", "wiki-notes.json", "wiki-github-collection.json", "wiki-features.json", "wiki-architecture.json"];
     let hasFilesToMigrate = false;
     for (const filename of filesToMigrate) {
       try {
@@ -214,6 +214,23 @@ async function syncFeaturesOnConnection() {
   }
 }
 
+async function syncArchitectureOnConnection() {
+  if (!window.wikiDirHandle) return;
+  try {
+    const diskArch = await window.readWikiFile("wiki-architecture.json");
+    if (diskArch) {
+      localStorage.setItem("wiki-architecture-state", JSON.stringify(diskArch));
+    } else {
+      const currentArch = JSON.parse(localStorage.getItem("wiki-architecture-state")) || [];
+      if (currentArch.length > 0) {
+        await window.writeWikiFile("wiki-architecture.json", currentArch);
+      }
+    }
+  } catch (e) {
+    console.error("Failed to sync architecture:", e);
+  }
+}
+
 // ── Floating Sync Pill State Updater ──
 function updateFloatingSyncPill() {
   const pill = document.getElementById("floating-sync-indicator");
@@ -306,6 +323,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             await syncNotesOnConnection();
             await syncGitHubCollectionOnConnection();
             await syncFeaturesOnConnection();
+            await syncArchitectureOnConnection();
             renderSidebar();
             updateFloatingSyncPill();
             window.dispatchEvent(new CustomEvent("wiki-sync-status-changed"));
@@ -325,6 +343,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           await syncNotesOnConnection();
           await syncGitHubCollectionOnConnection();
           await syncFeaturesOnConnection();
+          await syncArchitectureOnConnection();
           renderSidebar();
           updateFloatingSyncPill();
           window.dispatchEvent(new CustomEvent("wiki-sync-status-changed"));
@@ -409,7 +428,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       category: "Community & Code",
       items: [
         { name: "PR & Issue Explorer", path: "github-collection.html" },
-        { name: "Feature Parity Matrix", path: "feature-matrix.html" }
+        { name: "Feature Parity Matrix", path: "feature-matrix.html" },
+        { name: "Architectural DAG Builder", path: "arch-planner.html" }
       ]
     },
     {
@@ -587,6 +607,8 @@ document.addEventListener("DOMContentLoaded", async () => {
               await syncTasksOnConnection();
               await syncNotesOnConnection();
               await syncGitHubCollectionOnConnection();
+              await syncFeaturesOnConnection();
+              await syncArchitectureOnConnection();
               renderSidebar();
               window.dispatchEvent(new CustomEvent("wiki-sync-status-changed"));
             }
@@ -604,6 +626,8 @@ document.addEventListener("DOMContentLoaded", async () => {
             await syncTasksOnConnection();
             await syncNotesOnConnection();
             await syncGitHubCollectionOnConnection();
+            await syncFeaturesOnConnection();
+            await syncArchitectureOnConnection();
             renderSidebar();
             window.dispatchEvent(new CustomEvent("wiki-sync-status-changed"));
           } catch (e) {

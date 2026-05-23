@@ -1,0 +1,1239 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architectural DAG &amp; Integration Planner — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+<style>
+  /* Interactive Network DAG Graph custom aesthetics */
+  .dag-node-group circle {
+    transition: r 0.2s cubic-bezier(0.4, 0, 0.2, 1), stroke-width 0.2s, stroke 0.2s, filter 0.2s;
+  }
+  .dag-node-group:hover circle {
+    r: 25px !important;
+    stroke: var(--clay) !important;
+    stroke-width: 3px !important;
+    filter: drop-shadow(0 2px 8px rgba(217, 119, 87, 0.3)) !important;
+  }
+  .dag-node-group text {
+    transition: font-size 0.2s, font-weight 0.2s;
+    pointer-events: none;
+    user-select: none;
+  }
+  .dag-node-group:hover text {
+    font-size: 11.5px !important;
+    font-weight: 800 !important;
+  }
+</style>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Community &amp; Code</div>
+      <h1>Architectural DAG &amp; <em>Integration Planner</em></h1>
+      <p class="tagline">
+        Construct dynamic architectural dependencies, execute roadmap checklists, and export shareable integration proposals compiled directly from your GitHub Issues, PRs, and Discussions.
+      </p>
+    </header>
+
+    <!-- Top Section: Breathtaking Interactive Full-Width DAG Map Canvas -->
+    <div style="margin-bottom: 32px;">
+      <div class="nav-category" style="border-bottom: none; margin-bottom: 10px; font-size: 12px; font-weight: bold; letter-spacing: 0.05em; display: flex; justify-content: space-between; align-items: center;">
+        <span>🕸️ Interactive Architectural DAG &amp; Roadmap Map</span>
+        <span style="font-size: 11px; font-weight: normal; color: var(--g500); font-family: var(--mono);" id="simulation-status">Simulation Active</span>
+      </div>
+
+      <div id="github-dag-container" style="width: 100%; border: 1.5px solid var(--slate); border-radius: 12px; background: var(--paper); overflow: hidden; position: relative; box-shadow: 0 4px 12px rgba(20,20,19,0.02);">
+        <svg id="dag-svg" width="100%" height="400" viewBox="0 0 800 400" style="display: block;">
+          <defs>
+            <!-- Grid pattern -->
+            <pattern id="dag-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="var(--g100)" stroke-width="1" />
+              <circle cx="0" cy="0" r="1.5" fill="var(--g300)" />
+            </pattern>
+            
+            <!-- Glow filter for selected node -->
+            <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="6" result="blur" />
+              <feComposite in="SourceGraphic" in2="blur" operator="over" />
+            </filter>
+            
+            <!-- Arrow markers -->
+            <marker id="arrow-g300" viewBox="0 0 10 10" refX="28" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--g300)" />
+            </marker>
+            <marker id="arrow-clay" viewBox="0 0 10 10" refX="32" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--clay)" />
+            </marker>
+          </defs>
+          
+          <!-- Background grid -->
+          <rect width="100%" height="100%" fill="url(#dag-grid)" />
+          
+          <!-- Group layers for links and nodes -->
+          <g id="dag-links"></g>
+          <g id="dag-nodes"></g>
+        </svg>
+        
+        <!-- Sleek visual legend Overlay inside DAG map -->
+        <div style="position: absolute; bottom: 12px; left: 12px; background: rgba(250, 249, 245, 0.9); backdrop-filter: blur(8px); padding: 10px 14px; border-radius: 8px; border: 1.5px solid var(--g300); display: flex; flex-direction: column; gap: 4px; font-size: 10px; font-family: var(--sans); pointer-events: none; z-index: 10;">
+          <div style="font-weight: bold; color: var(--slate); margin-bottom: 2px;">Visual Legend</div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--clay);"></span>
+            <span>PR (Merged/Open)</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--olive);"></span>
+            <span>Issue</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--slate);"></span>
+            <span>Discussion</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px; margin-top: 2px; border-top: 1px solid var(--g200); padding-top: 2px;">
+            <span style="display: inline-block; width: 14px; height: 1.5px; background: var(--g300);"></span>
+            <span>parsed reference arrow</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search & Filter Controls -->
+    <div class="matrix-controls">
+      <div class="matrix-search-bar">
+        <input type="text" id="arch-search" class="matrix-search-input" placeholder="Search roadmap nodes or titles..." oninput="renderPlanner()">
+        
+        <select id="filter-layer" class="matrix-filter-select" onchange="renderPlanner()">
+          <option value="all">All Layers</option>
+          <option value="Catalog Operations">Catalog Operations</option>
+          <option value="Planning & Scans">Planning & Scans</option>
+          <option value="Row-Level Ops">Row-Level Ops</option>
+          <option value="Transactions">Transactions</option>
+          <option value="Maintenance & GC">Maintenance & GC</option>
+        </select>
+
+        <select id="filter-binding" class="matrix-filter-select" onchange="renderPlanner()">
+          <option value="all">All Bindings</option>
+          <option value="core">Core Spec</option>
+          <option value="java">Java</option>
+          <option value="python">Python</option>
+          <option value="rust">Rust</option>
+          <option value="go">Go</option>
+          <option value="cpp">C++</option>
+        </select>
+
+        <select id="filter-status" class="matrix-filter-select" onchange="renderPlanner()">
+          <option value="all">All Statuses</option>
+          <option value="complete">🟢 Complete</option>
+          <option value="in-progress">🟡 In Progress</option>
+          <option value="planned">🔵 Planned</option>
+          <option value="blocked">🔴 Blocked</option>
+        </select>
+      </div>
+
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-clay" onclick="openDrawer()">
+          ➕ Link Custom Component
+        </button>
+        <button class="btn" style="background: transparent; border-color: var(--slate); color: var(--slate);" onclick="resetToGitHubSample()">
+          🔄 Reset Planner Sandbox
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Workspace Split Pane -->
+    <div class="arch-planner-workspace">
+      
+      <!-- Left Column: Component Catalog List -->
+      <div>
+        <div class="matrix-container" style="max-height: 520px; overflow-y: auto; border: 1.5px solid var(--slate); border-radius: 12px; background: var(--paper); padding: 8px 0;">
+          <table class="matrix-table" style="margin: 0; width: 100%;">
+            <thead>
+              <tr>
+                <th style="width: 20%;">ID / Ref</th>
+                <th style="width: 40%;">Component Block</th>
+                <th style="width: 25%;">Layer / Subsystem</th>
+                <th style="width: 15%; text-align: center;">Status</th>
+              </tr>
+            </thead>
+            <tbody id="arch-list-body">
+              <!-- Dynamically populated by JS -->
+            </tbody>
+          </table>
+        </div>
+        
+        <div style="font-size: 12px; color: var(--g500); line-height: 1.5; font-family: var(--sans); margin-top: 12px;">
+          💡 <strong>Integrated Roadmap Planning:</strong> This dashboard merges real-time issues/PRs from your <a href="github-collection.html">GitHub Collection Explorer</a>. Connections (edges) represent parsed cross-referencing descriptions. Drag canvas nodes to re-arrange the visual map.
+        </div>
+      </div>
+
+      <!-- Right Column: Detail & Active Task Planner Panel -->
+      <div>
+        <div id="arch-detail-panel" class="matrix-detail-pane">
+          <!-- Dynamically populated by renderDetailPanel() -->
+        </div>
+
+        <!-- Section: Shareable Proposal Markdown Compiler -->
+        <div class="matrix-detail-pane" style="margin-top: 24px;">
+          <div class="arch-task-header" style="border-bottom: none; padding-bottom: 0;">
+            <div class="eyebrow" style="margin-bottom: 0;">Shareable Integration Proposal</div>
+            <button class="copy-proposal-btn" id="btn-copy-proposal" onclick="copyMarkdownProposal()">
+              📋 Copy Shareable Plan
+            </button>
+          </div>
+          <p style="font-size: 11.5px; color: var(--g500); margin: 0;">
+            Compiles the dynamic reference DAG, subsystem targets, and checklist metrics into a shareable markdown template.
+          </p>
+          <div class="mermaid-export-box">
+            <pre class="mermaid-code-preview" id="proposal-preview-area"><!-- Compiled proposal --></pre>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+</div>
+
+<!-- Add / Edit Drawer Modal overlay -->
+<div class="matrix-drawer-backdrop" id="drawer-backdrop" onclick="closeDrawer()"></div>
+<div class="matrix-drawer" id="block-drawer">
+  <div class="matrix-drawer-header">
+    <h3 class="matrix-drawer-title" id="drawer-title-label">Customize Component</h3>
+    <button class="matrix-drawer-close" onclick="closeDrawer()">×</button>
+  </div>
+  
+  <div class="drawer-form-group">
+    <label for="block-layer">Subsystem Layer</label>
+    <select id="block-layer" class="matrix-filter-select" style="width: 100%;">
+      <option value="Catalog Operations">Catalog Operations</option>
+      <option value="Planning & Scans">Planning & Scans</option>
+      <option value="Row-Level Ops">Row-Level Ops</option>
+      <option value="Transactions">Transactions</option>
+      <option value="Maintenance & GC">Maintenance & GC</option>
+    </select>
+  </div>
+
+  <div class="drawer-form-group">
+    <label for="block-status">Execution Status</label>
+    <select id="block-status" class="matrix-filter-select" style="width: 100%;">
+      <option value="planned">Planned</option>
+      <option value="in-progress">In Progress</option>
+      <option value="complete">Complete</option>
+      <option value="blocked">Blocked</option>
+    </select>
+  </div>
+
+  <div class="drawer-form-group">
+    <label>Extra Prerequisites (Depends On)</label>
+    <div class="checkbox-grid" id="drawer-deps-list">
+      <!-- Checked checkboxes injected dynamically -->
+    </div>
+    <span style="font-size: 11px; color: var(--g500); margin-top: 4px; display: inline-block;">
+      Note: Inherent references parsed from GitHub descriptions are automatically linked as prerequisites.
+    </span>
+  </div>
+
+  <div style="display: flex; gap: 12px; margin-top: 24px;">
+    <button class="btn btn-clay" style="flex: 1;" onclick="saveBlockFromDrawer()">
+      💾 Save Planner Overlay
+    </button>
+  </div>
+</div>
+
+<script>
+  // ── Unified Architecture Planning Databases State ──
+  let ghDatabase = [];      // Issues/PRs loaded from wiki-github-collection.json
+  let archDatabase = {};    // Custom planning overlays (layer, status, customDependsOn, customTasks, taskStates)
+  let plannerNodes = [];    // Merged roadmap nodes list
+  let selectedNodeId = null; // Issue/PR number of focused node
+
+  // 1. Standalone Core GitHub Mock Collection for fallback offline sandbox
+  const defaultGitHubCollection = [
+    {
+      number: "9280",
+      title: "Core: Add nanosecond timestamp support to Spec v3",
+      type: "pr",
+      state: "open",
+      binding: "core",
+      author: "aokolnychyi",
+      body: "Implements core spec requirements from #9201. Adds nanosecond resolution storage mappings. Closes #9201. Depends on final consensus in RFC discussion #9150.",
+      url: "https://github.com/apache/iceberg/pull/9280",
+      incoming: [],
+      outgoing: ["9201", "9150"]
+    },
+    {
+      number: "9250",
+      title: "Python: Implement V3 nanosecond timestamp reads",
+      type: "pr",
+      state: "merged",
+      binding: "python",
+      author: "fokko",
+      body: "Brings Python bindings to parity with core Java changes. Implements V3 nanosecond resolution schema parser and projections. Closes #9201. Closes #9120. Tested against core local outputs.",
+      url: "https://github.com/apache/iceberg/pull/9250",
+      incoming: [],
+      outgoing: ["9201", "9120"]
+    },
+    {
+      number: "9201",
+      title: "Support Nanosecond Timestamp Resolution in Spec v3",
+      type: "issue",
+      state: "open",
+      binding: "core",
+      author: "rdblue",
+      body: "Currently, the Iceberg V1 and V2 specs only permit microsecond resolution. To support higher precision streams, we should add nanosecond timestamp types to Spec V3. Tracked in discussion #9150. Requires implementation in Python client (#9250) and Java core (#9280).",
+      url: "https://github.com/apache/iceberg/issues/9201",
+      incoming: ["9280", "9250"],
+      outgoing: ["9150"]
+    },
+    {
+      number: "9150",
+      title: "Discussions on Timestamp Precision in v3 Specs",
+      type: "discussion",
+      state: "closed",
+      binding: "core",
+      author: "jackye1995",
+      body: "Community RFC outlining design constraints. This will be tracked and formalized in issue #9201. Feedback shows strong interest.",
+      url: "https://github.com/apache/iceberg/discussions/9150",
+      incoming: ["9280", "9201"],
+      outgoing: []
+    },
+    {
+      number: "9120",
+      title: "Core: Fix snapshot expiration boundary checks",
+      type: "issue",
+      state: "closed",
+      binding: "java",
+      author: "jackye1995",
+      body: "Fixes the boundary timestamp checks during snapshot expiration when dealing with empty catalogs. Resolved by PR #9250. - [x] Write regression unit tests\n- [x] Fix off-by-one catalog expiry logic\n- [ ] Deploy metastore validation checks",
+      url: "https://github.com/apache/iceberg/issues/9120",
+      incoming: ["9250"],
+      outgoing: []
+    }
+  ];
+
+  // 2. Setup Lifecycle Hooks
+  document.addEventListener("DOMContentLoaded", async () => {
+    window.addEventListener("wiki-sync-status-changed", async () => {
+      await loadPlannerData();
+    });
+
+    await loadPlannerData();
+  });
+
+  // Load and merge databases from local workspace files
+  async function loadPlannerData() {
+    // A. Load GitHub collection
+    let loadedGH = null;
+    if (window.wikiDirHandle) {
+      const diskData = await window.readWikiFile("wiki-github-collection.json");
+      if (diskData && diskData.length > 0) {
+        loadedGH = diskData;
+      }
+    }
+    if (!loadedGH) {
+      const cached = localStorage.getItem("wiki-github-collection");
+      if (cached) {
+        loadedGH = JSON.parse(cached);
+      }
+    }
+    ghDatabase = (loadedGH && loadedGH.length > 0) ? loadedGH : JSON.parse(JSON.stringify(defaultGitHubCollection));
+
+    // B. Load Architecture overlay metadata
+    let loadedArch = null;
+    if (window.wikiDirHandle) {
+      const diskArch = await window.readWikiFile("wiki-architecture.json");
+      if (diskArch) {
+        loadedArch = diskArch;
+      }
+    }
+    if (!loadedArch) {
+      const cached = localStorage.getItem("wiki-architecture-state");
+      if (cached) {
+        loadedArch = JSON.parse(cached);
+      }
+    }
+    archDatabase = loadedArch || {};
+
+    // C. Compile and merge databases
+    compilePlannerNodes();
+    
+    // Set default focused selection
+    if (plannerNodes.length > 0) {
+      if (!selectedNodeId || !plannerNodes.some(n => n.id === selectedNodeId)) {
+        selectedNodeId = plannerNodes[0].id;
+      }
+    } else {
+      selectedNodeId = null;
+    }
+
+    renderPlanner();
+  }
+
+  // Compile full dynamic planning profiles by overlaying custom metadata onto GitHub collection
+  function compilePlannerNodes() {
+    plannerNodes = ghDatabase.map(item => {
+      const overlay = archDatabase[item.number] || {};
+      
+      // Heuristic auto-derivation for unmapped items
+      let defaultLayer = "Catalog Operations";
+      const text = `${item.title} ${item.body || ''}`.toLowerCase();
+      if (text.includes("planning") || text.includes("scan") || text.includes("projection")) {
+        defaultLayer = "Planning & Scans";
+      } else if (text.includes("delete") || text.includes("row-level") || text.includes("mor") || text.includes("cow")) {
+        defaultLayer = "Row-Level Ops";
+      } else if (text.includes("transaction") || text.includes("isolation") || text.includes("commit")) {
+        defaultLayer = "Transactions";
+      } else if (text.includes("compaction") || text.includes("rewrite") || text.includes("expire") || text.includes("gc")) {
+        defaultLayer = "Maintenance & GC";
+      }
+
+      let defaultStatus = "planned";
+      if (item.state === "merged" || item.state === "closed") {
+        defaultStatus = "complete";
+      } else if (item.state === "open" && (item.body || "").includes("- [x]")) {
+        defaultStatus = "in-progress";
+      }
+
+      const layer = overlay.layer || defaultLayer;
+      const status = overlay.status || defaultStatus;
+      const customDependsOn = overlay.customDependsOn || [];
+      const customTasks = overlay.customTasks || [];
+      const taskStates = overlay.taskStates || {};
+
+      // Parse markdown checklists directly from body text
+      const parsedBodyTasks = parseChecklistFromMarkdown(item.body || "");
+
+      // Apply overridden states for body checklists
+      parsedBodyTasks.forEach(t => {
+        if (taskStates[t.id] !== undefined) {
+          t.completed = taskStates[t.id];
+        }
+      });
+
+      // Apply overridden states for custom planner checklists
+      customTasks.forEach(t => {
+        if (taskStates[t.id] !== undefined) {
+          t.completed = taskStates[t.id];
+        }
+      });
+
+      // Combine inherent references with extra custom links
+      const dependsOn = [...new Set([...(item.outgoing || []), ...customDependsOn])];
+
+      return {
+        id: item.number,
+        title: item.title,
+        type: item.type,
+        binding: item.binding || "core",
+        author: item.author,
+        desc: item.body || "",
+        url: item.url,
+        layer: layer,
+        status: status,
+        dependsOn: dependsOn,
+        customDependsOn: customDependsOn,
+        customTasks: customTasks,
+        parsedBodyTasks: parsedBodyTasks,
+        taskStates: taskStates
+      };
+    });
+  }
+
+  // Parse markdown checklists in body text
+  function parseChecklistFromMarkdown(body) {
+    const tasks = [];
+    const lines = body.split(/\r?\n/);
+    let index = 0;
+    lines.forEach(line => {
+      const match = line.match(/^[\s\-\*]*\[([ xX])\]\s*(.+)$/);
+      if (match) {
+        tasks.push({
+          id: `body-task-${index++}`,
+          text: match[2].trim(),
+          completed: match[1].toLowerCase() === 'x',
+          isBodyTask: true
+        });
+      }
+    });
+    return tasks;
+  }
+
+  // Save planner overlays to disk
+  async function savePlannerOverlay() {
+    localStorage.setItem("wiki-architecture-state", JSON.stringify(archDatabase));
+    if (window.wikiDirHandle) {
+      await window.writeWikiFile("wiki-architecture.json", archDatabase);
+    }
+    compilePlannerNodes();
+    compileProposalMarkdown();
+  }
+
+  async function resetToGitHubSample() {
+    if (confirm("Are you sure you want to reset all planner configurations and rely on the core GitHub Mock collection?")) {
+      archDatabase = {};
+      selectedNodeId = "9280";
+      await savePlannerOverlay();
+      renderPlanner();
+    }
+  }
+
+  // 3. Dynamic Rendering & Workspace Redraws
+  function renderPlanner() {
+    const searchVal = document.getElementById("arch-search").value.toLowerCase().trim();
+    const layerFilter = document.getElementById("filter-layer").value;
+    const bindingFilter = document.getElementById("filter-binding").value;
+    const statusFilter = document.getElementById("filter-status").value;
+    const tbody = document.getElementById("arch-list-body");
+
+    tbody.innerHTML = "";
+
+    let filtered = plannerNodes;
+
+    // Apply Filter constraints
+    if (searchVal) {
+      filtered = filtered.filter(b => 
+        b.id.includes(searchVal) ||
+        b.title.toLowerCase().includes(searchVal) || 
+        b.desc.toLowerCase().includes(searchVal)
+      );
+    }
+    if (layerFilter !== "all") {
+      filtered = filtered.filter(b => b.layer === layerFilter);
+    }
+    if (bindingFilter !== "all") {
+      filtered = filtered.filter(b => b.binding === bindingFilter);
+    }
+    if (statusFilter !== "all") {
+      filtered = filtered.filter(b => b.status === statusFilter);
+    }
+
+    // Initialize/sync interactive DAG simulation
+    initDAGSimulation(filtered);
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="4" style="text-align: center; color: var(--g500); padding: 32px; font-style: italic;">
+            No components match the active search and filter constraints.
+          </td>
+        </tr>
+      `;
+      document.getElementById("arch-detail-panel").innerHTML = "";
+      return;
+    }
+
+    // Sort by Layer then ID number descending
+    filtered.sort((a, b) => {
+      if (a.layer !== b.layer) return a.layer.localeCompare(b.layer);
+      return parseInt(b.id) - parseInt(a.id);
+    });
+
+    filtered.forEach(node => {
+      const isSelected = node.id === selectedNodeId;
+      const row = document.createElement("tr");
+      if (isSelected) row.className = "active-row";
+
+      row.onclick = () => {
+        selectedNodeId = node.id;
+        renderPlanner();
+      };
+
+      const bindingIcons = {
+        core: "🌐 Spec",
+        java: "☕ Java",
+        python: "🐍 Python",
+        rust: "🦀 Rust",
+        go: "🐹 Go",
+        cpp: "👾 C++"
+      };
+
+      row.innerHTML = `
+        <td style="font-family: var(--mono); font-weight: bold; color: var(--slate); font-size: 12px; cursor: pointer;">
+          #${node.id}
+        </td>
+        <td style="font-weight: 600; color: var(--slate); cursor: pointer;">
+          ${node.title}
+          <div style="font-size: 10px; color: var(--g500); font-weight: normal; margin-top: 3px; text-transform: uppercase;">
+            ${node.type} | @${node.author}
+          </div>
+        </td>
+        <td style="font-size: 12px; color: var(--g700); font-weight: 500;">
+          ${node.layer}
+        </td>
+        <td style="text-align: center;">
+          <span class="badge-status ${node.status}">${node.status}</span>
+        </td>
+      `;
+
+      tbody.appendChild(row);
+    });
+
+    renderDetailPanel();
+    compileProposalMarkdown();
+  }
+
+  // Draw active details panel, unified checklists, and dynamic layers
+  function renderDetailPanel() {
+    const panel = document.getElementById("arch-detail-panel");
+    const active = plannerNodes.find(b => b.id === selectedNodeId);
+
+    if (!active) {
+      panel.innerHTML = `
+        <div style="text-align: center; padding: 48px 24px; color: var(--g500); font-style: italic;">
+          <h3>No Architectural Component Selected</h3>
+          <p>Please choose an issue or PR node from the map or catalog list to configure checklists and subsystem properties.</p>
+        </div>
+      `;
+      return;
+    }
+
+    // Compile dynamic checklist items
+    const bodyTasks = active.parsedBodyTasks || [];
+    const customTasks = active.customTasks || [];
+    const totalTasks = [...bodyTasks, ...customTasks];
+
+    let checklistHTML = "";
+    if (totalTasks.length === 0) {
+      checklistHTML = `<div style="font-size: 12.5px; color: var(--g500); font-style: italic; text-align: center; padding: 12px 0;">No tasks found. Parse checklists inside description body or add manual checklist items below.</div>`;
+    } else {
+      checklistHTML = totalTasks.map(t => {
+        return `
+          <div class="arch-task-item ${t.completed ? 'completed' : ''}">
+            <input type="checkbox" class="arch-task-checkbox" ${t.completed ? 'checked' : ''} onclick="toggleTaskCompletion('${active.id}', '${t.id}')">
+            <span class="arch-task-text" style="display: flex; align-items: center; gap: 6px;">
+              ${t.isBodyTask ? `<span style="font-size: 9px; font-weight: bold; background: var(--g200); color: var(--g600); padding: 1px 4px; border-radius: 3px; font-family: var(--mono);">BODY</span>` : `<span style="font-size: 9px; font-weight: bold; background: var(--clay-l); color: var(--clay); padding: 1px 4px; border-radius: 3px; font-family: var(--mono);">CUSTOM</span>`}
+              <span>${t.text}</span>
+            </span>
+            ${!t.isBodyTask ? `<button class="arch-task-delete" onclick="deleteCustomTask('${active.id}', '${t.id}')" title="Delete custom task">×</button>` : ''}
+          </div>
+        `;
+      }).join("");
+    }
+
+    panel.innerHTML = `
+      <div>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
+          <div class="eyebrow" style="margin-bottom: 2px;">Architectural Planning Detail</div>
+          <div style="display: flex; gap: 6px;">
+            <button class="btn" style="padding: 2px 8px; font-size: 10.5px; border-color: var(--slate); background: transparent;" onclick="openDrawer('${active.id}')">
+              ✏️ Edit Dependencies &amp; Layers
+            </button>
+            <a href="${active.url}" target="_blank" class="btn" style="padding: 2px 8px; font-size: 10.5px; border-color: var(--slate); background: transparent; text-decoration: none;">
+              View GitHub ↗
+            </a>
+          </div>
+        </div>
+        <h2 style="margin: 4px 0 8px; font-size: 20px;">
+          <span style="font-family: var(--mono); background: var(--slate); color: var(--paper); font-size: 10px; font-weight: bold; padding: 2px 5px; border-radius: 4px; vertical-align: middle; margin-right: 6px;">
+            ${active.layer.toUpperCase()}
+          </span>
+          #${active.id}: ${active.title}
+        </h2>
+        <p style="font-size: 11.5px; color: var(--g500); font-family: var(--mono); margin-top: -4px; margin-bottom: 8px;">
+          Author: @${active.author} | Language binding: ${active.binding.toUpperCase()} | Type: ${active.type.toUpperCase()}
+        </p>
+        <div style="background: var(--ivory); border: 1.5px solid var(--g300); border-radius: 8px; padding: 12px 16px; font-size: 13px; line-height: 1.5; color: var(--g700); max-height: 100px; overflow-y: auto;">
+          ${active.desc || '<em>No description provided.</em>'}
+        </div>
+      </div>
+
+      <!-- Section: Dynamic Unified Roadmap Checklist Card -->
+      <div style="margin-top: 18px;">
+        <div class="nav-category" style="border-bottom: none; margin-bottom: 6px; font-size: 11px; font-weight: bold; letter-spacing: 0.05em;">
+          Unified Checklist Progress
+        </div>
+        <div class="arch-task-card">
+          <div class="arch-task-header">
+            <span style="font-size: 11px; font-weight: bold; color: var(--clay);">TASKS LIST</span>
+            <span style="font-size: 11px; color: var(--g500); font-family: var(--mono);" id="checklist-progress-ratio">
+              <!-- Dynamically compiled ratio -->
+            </span>
+          </div>
+          
+          <div id="checklist-tasks-container">
+            ${checklistHTML}
+          </div>
+
+          <div class="arch-task-adder">
+            <input type="text" id="new-task-text" class="matrix-search-input" style="height: 32px;" placeholder="Add custom planner task..." onkeydown="handleTaskAdderKeydown(event, '${active.id}')">
+            <button class="btn btn-clay" style="height: 32px; padding: 0 12px; font-size: 11.5px;" onclick="addCustomTask('${active.id}')">➕ Add</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    updateTaskProgressIndicator(active);
+  }
+
+  function updateTaskProgressIndicator(node) {
+    const ratioSpan = document.getElementById("checklist-progress-ratio");
+    if (!ratioSpan) return;
+    const bodyTasks = node.parsedBodyTasks || [];
+    const customTasks = node.customTasks || [];
+    const total = [...bodyTasks, ...customTasks];
+
+    if (total.length === 0) {
+      ratioSpan.textContent = "0/0 (0%)";
+      return;
+    }
+    const completed = total.filter(t => t.completed).length;
+    const percent = Math.round((completed / total.length) * 100);
+    ratioSpan.textContent = `${completed}/${total.length} (${percent}%)`;
+  }
+
+  // 4. Checklist Actions
+  async function toggleTaskCompletion(nodeId, taskId) {
+    if (!archDatabase[nodeId]) {
+      archDatabase[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+    }
+    if (!archDatabase[nodeId].taskStates) {
+      archDatabase[nodeId].taskStates = {};
+    }
+    
+    // Read current state from compiled lists
+    const node = plannerNodes.find(n => n.id === nodeId);
+    if (node) {
+      const allTasks = [...(node.parsedBodyTasks || []), ...(node.customTasks || [])];
+      const task = allTasks.find(t => t.id === taskId);
+      if (task) {
+        const nextState = !task.completed;
+        archDatabase[nodeId].taskStates[taskId] = nextState;
+        await savePlannerOverlay();
+        renderPlanner();
+      }
+    }
+  }
+
+  async function addCustomTask(nodeId) {
+    const input = document.getElementById("new-task-text");
+    if (!input) return;
+    const textVal = input.value.trim();
+    if (!textVal) return;
+
+    if (!archDatabase[nodeId]) {
+      archDatabase[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+    }
+    if (!archDatabase[nodeId].customTasks) {
+      archDatabase[nodeId].customTasks = [];
+    }
+
+    const newTask = {
+      id: "custom-task-" + Date.now(),
+      text: textVal,
+      completed: false
+    };
+
+    archDatabase[nodeId].customTasks.push(newTask);
+    input.value = "";
+
+    await savePlannerOverlay();
+    renderPlanner();
+  }
+
+  function handleTaskAdderKeydown(event, nodeId) {
+    if (event.key === "Enter") {
+      addCustomTask(nodeId);
+    }
+  }
+
+  async function deleteCustomTask(nodeId, taskId) {
+    if (archDatabase[nodeId] && archDatabase[nodeId].customTasks) {
+      archDatabase[nodeId].customTasks = archDatabase[nodeId].customTasks.filter(t => t.id !== taskId);
+      if (archDatabase[nodeId].taskStates) {
+        delete archDatabase[nodeId].taskStates[taskId];
+      }
+      await savePlannerOverlay();
+      renderPlanner();
+    }
+  }
+
+  // 5. Interactive SVG DAG Force-Directed Simulation Engine
+  let simulationNodes = [];
+  let simulationLinks = [];
+  let isSimulating = false;
+  let draggedNode = null;
+  let animationFrameId = null;
+
+  function initDAGSimulation(filteredItems) {
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+    }
+
+    const width = 800;
+    const height = 400;
+
+    const idMap = new Map();
+    simulationNodes = filteredItems.map((item, idx) => {
+      const existing = simulationNodes.find(n => n.id === item.id);
+      const angle = (idx / filteredItems.length) * 2 * Math.PI;
+      const radius = Math.min(width, height) * 0.35;
+
+      const node = {
+        ...item,
+        x: existing ? existing.x : width / 2 + Math.cos(angle) * radius + (Math.random() - 0.5) * 15,
+        y: existing ? existing.y : height / 2 + Math.sin(angle) * radius + (Math.random() - 0.5) * 15,
+        fx: existing ? existing.fx : null,
+        fy: existing ? existing.fy : null,
+        vx: 0,
+        vy: 0
+      };
+      idMap.set(item.id, node);
+      return node;
+    });
+
+    simulationLinks = [];
+    const idsInFiltered = new Set(filteredItems.map(item => item.id));
+
+    filteredItems.forEach(item => {
+      (item.dependsOn || []).forEach(depId => {
+        if (idsInFiltered.has(depId)) {
+          simulationLinks.push({
+            source: idMap.get(depId),
+            target: idMap.get(item.id)
+          });
+        }
+      });
+    });
+
+    isSimulating = true;
+    tickSimulation();
+  }
+
+  function tickSimulation() {
+    if (!isSimulating) return;
+
+    const width = 800;
+    const height = 400;
+
+    // 1. Repulsion force pushing nodes apart
+    const kRepel = 3200;
+    for (let i = 0; i < simulationNodes.length; i++) {
+      const nodeA = simulationNodes[i];
+      for (let j = i + 1; j < simulationNodes.length; j++) {
+        const nodeB = simulationNodes[j];
+
+        const dx = nodeB.x - nodeA.x;
+        const dy = nodeB.y - nodeA.y;
+        const distSq = dx * dx + dy * dy + 0.1;
+        const dist = Math.sqrt(distSq);
+
+        if (dist < 300) {
+          const force = kRepel / distSq;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          if (nodeA.fx === null) { nodeA.vx -= fx; nodeA.vy -= fy; }
+          if (nodeB.fx === null) { nodeB.vx += fx; nodeB.vy += fy; }
+        }
+      }
+    }
+
+    // 2. Spring attraction along links pulling connected nodes together
+    const kAttract = 0.05;
+    const restLength = 110;
+    simulationLinks.forEach(link => {
+      const nodeA = link.source;
+      const nodeB = link.target;
+
+      const dx = nodeB.x - nodeA.x;
+      const dy = nodeB.y - nodeA.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 0.1;
+
+      const displacement = dist - restLength;
+      const force = kAttract * displacement;
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
+
+      if (nodeA.fx === null) { nodeA.vx += fx; nodeA.vy += fy; }
+      if (nodeB.fx === null) { nodeB.vx -= fx; nodeB.vy -= fy; }
+    });
+
+    // 3. Central gravity keeps the entire group centered
+    const kGravity = 0.02;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    simulationNodes.forEach(node => {
+      if (node.fx === null) {
+        const dx = centerX - node.x;
+        const dy = centerY - node.y;
+        node.vx += dx * kGravity;
+        node.vy += dy * kGravity;
+      }
+    });
+
+    // 4. Update coordinates and apply damping
+    const damping = 0.8;
+    simulationNodes.forEach(node => {
+      if (node.fx !== null) {
+        node.x = node.fx;
+        node.y = node.fy;
+        node.vx = 0;
+        node.vy = 0;
+      } else {
+        node.x += node.vx;
+        node.y += node.vy;
+        node.vx *= damping;
+        node.vy *= damping;
+
+        // Margin bounds
+        const margin = 28;
+        node.x = Math.max(margin, Math.min(width - margin, node.x));
+        node.y = Math.max(margin, Math.min(height - margin, node.y));
+      }
+    });
+
+    drawSVGGraph();
+
+    animationFrameId = requestAnimationFrame(tickSimulation);
+  }
+
+  function handleNodeMouseDown(event, node) {
+    draggedNode = node;
+    const svg = document.getElementById("dag-svg");
+    const rect = svg.getBoundingClientRect();
+
+    const scaleX = 800 / rect.width;
+    const scaleY = 400 / rect.height;
+
+    function handleMouseMove(e) {
+      if (!draggedNode) return;
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
+      draggedNode.fx = Math.max(20, Math.min(780, x));
+      draggedNode.fy = Math.max(20, Math.min(380, y));
+    }
+
+    function handleMouseUp() {
+      if (draggedNode) {
+        draggedNode.fx = null;
+        draggedNode.fy = null;
+        draggedNode = null;
+      }
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  }
+
+  function drawSVGGraph() {
+    const svg = document.getElementById("dag-svg");
+    if (!svg) return;
+
+    const linkGroup = svg.getElementById("dag-links");
+    const nodeGroup = svg.getElementById("dag-nodes");
+
+    if (!linkGroup || !nodeGroup) return;
+
+    // Draw Edges (reference lines)
+    linkGroup.innerHTML = "";
+    simulationLinks.forEach(link => {
+      const source = link.source;
+      const target = link.target;
+
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", source.x);
+      line.setAttribute("y1", source.y);
+      line.setAttribute("x2", target.x);
+      line.setAttribute("y2", target.y);
+
+      const isSelectedConnection = (String(source.id) === selectedNodeId || String(target.id) === selectedNodeId);
+      line.setAttribute("stroke", isSelectedConnection ? "var(--clay)" : "var(--g300)");
+      line.setAttribute("stroke-width", isSelectedConnection ? "2.5" : "1.5");
+      line.setAttribute("marker-end", isSelectedConnection ? "url(#arrow-clay)" : "url(#arrow-g300)");
+
+      linkGroup.appendChild(line);
+    });
+
+    // Draw Nodes
+    nodeGroup.innerHTML = "";
+    simulationNodes.forEach(node => {
+      const isSelected = String(node.id) === selectedNodeId;
+
+      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      g.setAttribute("class", `dag-node-group ${isSelected ? 'selected' : ''}`);
+      g.style.cursor = "grab";
+
+      g.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        selectedNodeId = node.id;
+        renderPlanner();
+      });
+
+      // Circle Base
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      circle.setAttribute("cx", node.x);
+      circle.setAttribute("cy", node.y);
+      circle.setAttribute("r", isSelected ? "24" : "20");
+
+      let fill = "var(--slate)";
+      if (node.type === "pr") {
+        fill = "var(--clay)";
+      } else if (node.type === "issue") {
+        fill = "var(--olive)";
+      }
+
+      circle.setAttribute("fill", fill);
+
+      let stroke = "var(--g300)";
+      if (node.status === "complete") {
+        stroke = "var(--olive)";
+      } else if (node.status === "blocked") {
+        stroke = "var(--clay)";
+      } else if (node.status === "in-progress") {
+        stroke = "#F39C12";
+      }
+
+      circle.setAttribute("stroke", isSelected ? "var(--clay)" : stroke);
+      circle.setAttribute("stroke-width", isSelected ? "3.5" : "2");
+      circle.setAttribute("filter", isSelected ? "url(#glow)" : "none");
+
+      g.appendChild(circle);
+
+      // Binding indicator dot
+      const bindingColors = {
+        core: "#95A5A6",
+        java: "#E67E22",
+        python: "#3498DB",
+        rust: "#D35400",
+        go: "#1ABC9C",
+        cpp: "#9B59B6"
+      };
+      const bDot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      bDot.setAttribute("cx", node.x + 14);
+      bDot.setAttribute("cy", node.y - 14);
+      bDot.setAttribute("r", "5.5");
+      bDot.setAttribute("fill", bindingColors[node.binding || "core"]);
+      bDot.setAttribute("stroke", "var(--paper)");
+      bDot.setAttribute("stroke-width", "1.5");
+      g.appendChild(bDot);
+
+      // Text label inside node circle
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", node.x);
+      text.setAttribute("y", node.y + 4);
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("fill", "var(--paper)");
+      text.setAttribute("font-size", isSelected ? "11px" : "10px");
+      text.setAttribute("font-weight", "bold");
+      text.setAttribute("font-family", "var(--mono)");
+      text.textContent = `#${node.id}`;
+      g.appendChild(text);
+
+      // Text label underneath
+      const nameText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      nameText.setAttribute("x", node.x);
+      nameText.setAttribute("y", node.y + (isSelected ? "40" : "34"));
+      nameText.setAttribute("text-anchor", "middle");
+      nameText.setAttribute("fill", isSelected ? "var(--clay)" : "var(--slate)");
+      nameText.setAttribute("font-size", "9.5px");
+      nameText.setAttribute("font-weight", isSelected ? "bold" : "600");
+      nameText.setAttribute("font-family", "var(--sans)");
+
+      let shortTitle = node.title;
+      if (shortTitle.length > 20) {
+        shortTitle = shortTitle.substring(0, 17) + "...";
+      }
+      nameText.textContent = shortTitle;
+      g.appendChild(nameText);
+
+      // Interactive Tooltip
+      const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+      title.textContent = `[${node.type.toUpperCase()}] #${node.id}: ${node.title}\nLayer: ${node.layer}\nStatus: ${node.status.toUpperCase()}`;
+      g.appendChild(title);
+
+      nodeGroup.appendChild(g);
+    });
+  }
+
+  // 6. Shareable Proposal Compiler
+  function compileProposalMarkdown() {
+    const preview = document.getElementById("proposal-preview-area");
+    if (!preview) return;
+
+    if (plannerNodes.length === 0) {
+      preview.textContent = "No architectural roadmap components registered.";
+      return;
+    }
+
+    // A. Compile Mermaid Flowchart
+    let mermaidGraph = "```mermaid\nflowchart TD\n";
+    let hasLinks = false;
+
+    plannerNodes.forEach(node => {
+      const activeIdClean = `issue_${node.id}`;
+      const statusIcon = node.status === "complete" ? "🟢" : (node.status === "in-progress" ? "🟡" : "🔵");
+      
+      // Node Definition
+      mermaidGraph += `    ${activeIdClean}["${statusIcon} #${node.id}: ${node.title} (${node.status.toUpperCase()})"]\n`;
+      
+      // Links
+      (node.dependsOn || []).forEach(depId => {
+        const depClean = `issue_${depId}`;
+        mermaidGraph += `    ${depClean} --> ${activeIdClean}\n`;
+        hasLinks = true;
+      });
+    });
+
+    if (!hasLinks) {
+      mermaidGraph += "    %% No explicit references or prerequisite links detected\n";
+    }
+    mermaidGraph += "```\n";
+
+    // B. Compile Details Section
+    let detailsList = "";
+    plannerNodes.forEach(node => {
+      detailsList += `### 📂 #${node.id}: ${node.title}\n`;
+      detailsList += `*   **Subsystem Layer**: \`${node.layer}\` | **Language Target**: \`${node.binding.toUpperCase()}\` | **Status**: \`${node.status.toUpperCase()}\`\n`;
+      detailsList += `*   **Source Reference**: [View GitHub #${node.id}](${node.url})\n`;
+      
+      const allTasks = [...(node.parsedBodyTasks || []), ...(node.customTasks || [])];
+      if (allTasks.length > 0) {
+        detailsList += `*   **Actionable Roadmaps**:\n`;
+        allTasks.forEach(t => {
+          detailsList += `    - [${t.completed ? 'x' : ' '}] ${t.text}\n`;
+        });
+      } else {
+        detailsList += `*   *No task items added for this node.*\n`;
+      }
+      detailsList += `\n`;
+    });
+
+    const fullProposalText = 
+`# GitHub Collection-Based Architectural Execution Proposal
+
+This proposal outlines the dynamic dependency flow, language configuration matrices, and checklists compiled from the active GitHub Collection.
+
+## 🔗 Integrated Architectural Graph Flow
+Below is the auto-generated Mermaid flowchart mapping all issue/PR reference links:
+
+${mermaidGraph}
+## 🛠️ Component Checklists & Execution Roadmap
+Here are the summaries and checklists for each registered resource:
+
+${detailsList}
+*Proposal dynamically generated using the Architectural Planner dashboard.*
+`;
+
+    preview.textContent = fullProposalText;
+  }
+
+  function copyMarkdownProposal() {
+    const textToCopy = document.getElementById("proposal-preview-area").textContent;
+    if (!textToCopy) return;
+
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      const btn = document.getElementById("btn-copy-proposal");
+      btn.textContent = "Copied! ✓";
+      btn.classList.add("copied");
+      setTimeout(() => {
+        btn.textContent = "📋 Copy Shareable Plan";
+        btn.classList.remove("copied");
+      }, 1800);
+    }).catch(err => {
+      console.error("Clipboard copy failed:", err);
+      alert("Failed to copy markdown. Please select the text inside the code preview and copy it manually.");
+    });
+  }
+
+  // 7. Modal Drawer overlay controls
+  let editingNodeId = null;
+
+  function openDrawer(nodeId = null) {
+    editingNodeId = nodeId;
+    const backdrop = document.getElementById("drawer-backdrop");
+    const drawer = document.getElementById("block-drawer");
+    const titleLabel = document.getElementById("drawer-title-label");
+
+    if (!nodeId) {
+      alert("Please select a focused component block to edit its configuration overlays.");
+      return;
+    }
+
+    // Populate checklist of dependencies
+    const depsContainer = document.getElementById("drawer-deps-list");
+    depsContainer.innerHTML = "";
+
+    // List all other nodes
+    const availableNodes = plannerNodes.filter(b => b.id !== nodeId);
+
+    if (availableNodes.length === 0) {
+      depsContainer.innerHTML = `<span style="font-size: 11.5px; color: var(--g500); font-style: italic;">No other components registered</span>`;
+    } else {
+      availableNodes.forEach(b => {
+        depsContainer.innerHTML += `
+          <label class="checkbox-item">
+            <input type="checkbox" name="drawer-deps" value="${b.id}">
+            <span>#${b.id}: ${b.title}</span>
+          </label>
+        `;
+      });
+    }
+
+    // Edit fields
+    titleLabel.textContent = `Configure Component #${nodeId}`;
+
+    const active = plannerNodes.find(b => b.id === nodeId);
+    document.getElementById("block-layer").value = active.layer;
+    document.getElementById("block-status").value = active.status;
+
+    // Check checkboxes for custom DependsOn links
+    const checkboxes = document.querySelectorAll('input[name="drawer-deps"]');
+    const customDeps = active.customDependsOn || [];
+    checkboxes.forEach(cb => {
+      if (customDeps.includes(cb.value)) {
+        cb.checked = true;
+      }
+    });
+
+    backdrop.classList.add("open");
+    drawer.classList.add("open");
+  }
+
+  function closeDrawer() {
+    document.getElementById("drawer-backdrop").classList.remove("open");
+    document.getElementById("block-drawer").classList.remove("open");
+    editingNodeId = null;
+  }
+
+  async function saveBlockFromDrawer() {
+    if (!editingNodeId) return;
+
+    const layerVal = document.getElementById("block-layer").value;
+    const statusVal = document.getElementById("block-status").value;
+
+    const selectedDeps = [];
+    const checkboxes = document.querySelectorAll('input[name="drawer-deps"]:checked');
+    checkboxes.forEach(cb => selectedDeps.push(cb.value));
+
+    // Save overlay to archDatabase
+    if (!archDatabase[editingNodeId]) {
+      archDatabase[editingNodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+    }
+    archDatabase[editingNodeId].layer = layerVal;
+    archDatabase[editingNodeId].status = statusVal;
+    archDatabase[editingNodeId].customDependsOn = selectedDeps;
+
+    await savePlannerOverlay();
+    closeDrawer();
+    renderPlanner();
+  }
+</script>
+</body>
+</html>

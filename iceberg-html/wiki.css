@@ -1619,4 +1619,142 @@ table.parity-table tr:last-child td {
   color: var(--clay);
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   ARCHITECTURAL DAG PLANNER STYLES
+   ────────────────────────────────────────────────────────────────────────── */
+.arch-planner-workspace {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  gap: 32px;
+  margin-top: 24px;
+  align-items: start;
+}
+@media (max-width: 1200px) {
+  .arch-planner-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Custom Task Card for Checklist */
+.arch-task-card {
+  background: var(--paper);
+  border: 1.5px solid var(--slate);
+  border-radius: 12px;
+  padding: 18px 24px;
+  box-shadow: 0 4px 16px rgba(20,20,19,0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.arch-task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--g300);
+  padding-bottom: 8px;
+}
+
+.arch-task-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--g200);
+}
+.arch-task-item:last-child {
+  border-bottom: none;
+}
+
+.arch-task-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--clay);
+}
+
+.arch-task-text {
+  font-size: 13px;
+  color: var(--slate);
+  flex: 1;
+  transition: all 120ms;
+}
+.arch-task-item.completed .arch-task-text {
+  color: var(--g500);
+  text-decoration: line-through;
+}
+
+.arch-task-delete {
+  background: none;
+  border: none;
+  color: var(--g400);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  transition: color 120ms;
+}
+.arch-task-delete:hover {
+  color: var(--clay);
+}
+
+/* Dynamic task inline adder */
+.arch-task-adder {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Mermaid Exporter Container */
+.mermaid-export-box {
+  background: var(--ivory);
+  border: 1px solid var(--g300);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 12px;
+  position: relative;
+}
+
+.mermaid-code-preview {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--slate);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  line-height: 1.5;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.copy-proposal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--paper);
+  border: 1.5px solid var(--clay);
+  color: var(--clay);
+  font-weight: 600;
+  font-size: 11.5px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 150ms;
+}
+.copy-proposal-btn:hover {
+  background: var(--clay);
+  color: var(--paper);
+  box-shadow: 0 2px 8px rgba(217, 119, 87, 0.15);
+}
+.copy-proposal-btn.copied {
+  border-color: var(--olive);
+  color: var(--olive);
+}
+.copy-proposal-btn.copied:hover {
+  background: var(--olive);
+  color: var(--paper);
+}
+
+
 
