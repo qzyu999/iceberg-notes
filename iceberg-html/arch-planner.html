@@ -520,6 +520,7 @@
         const layer = overlay.layer || defaultLayer;
         const status = overlay.status || defaultStatus;
         const customDependsOn = overlay.customDependsOn || [];
+        const ignoredDependsOn = overlay.ignoredDependsOn || [];
         const customTasks = overlay.customTasks || [];
         const taskStates = overlay.taskStates || {};
 
@@ -542,8 +543,9 @@
 
         // Filter links so they only point to nodes actually included in the active custom plan
         const parsedDependsOn = (item.outgoing || []).filter(depId => nodesInPlan.includes(depId));
+        const activeInherentDeps = parsedDependsOn.filter(depId => !ignoredDependsOn.includes(depId));
         const filteredCustomDeps = customDependsOn.filter(depId => nodesInPlan.includes(depId));
-        const dependsOn = [...new Set([...parsedDependsOn, ...filteredCustomDeps])];
+        const dependsOn = [...new Set([...activeInherentDeps, ...filteredCustomDeps])];
 
         return {
           id: item.number,
@@ -557,6 +559,7 @@
           status: status,
           dependsOn: dependsOn,
           customDependsOn: customDependsOn,
+          ignoredDependsOn: ignoredDependsOn,
           customTasks: customTasks,
           parsedBodyTasks: parsedBodyTasks,
           taskStates: taskStates
@@ -1407,11 +1410,16 @@ ${detailsList}
     if (availableNodes.length === 0) {
       depsContainer.innerHTML = `<span style="font-size: 11.5px; color: var(--g500); font-style: italic;">No other components registered in the active plan</span>`;
     } else {
+      const ghItem = ghDatabase.find(item => item.number === nodeId);
+      const inherentOutgoing = ghItem ? (ghItem.outgoing || []) : [];
+
       availableNodes.forEach(b => {
+        const isInherent = inherentOutgoing.includes(b.id);
+        const tag = isInherent ? ` <span style="font-size: 8.5px; font-weight: bold; background: var(--g200); color: var(--g600); padding: 1px 3px; border-radius: 3px; margin-left: 4px; font-family: var(--mono);">INHERENT</span>` : ``;
         depsContainer.innerHTML += `
-          <label class="checkbox-item">
-            <input type="checkbox" name="drawer-deps" value="${b.id}">
-            <span>#${b.id}: ${b.title}</span>
+          <label class="checkbox-item" style="display: flex; align-items: center; gap: 6px; padding: 4px 0;">
+            <input type="checkbox" name="drawer-deps" value="${b.id}" data-inherent="${isInherent}">
+            <span>#${b.id}: ${b.title}${tag}</span>
           </label>
         `;
       });
@@ -1424,11 +1432,11 @@ ${detailsList}
     document.getElementById("block-layer").value = active.layer;
     document.getElementById("block-status").value = active.status;
 
-    // Check checkboxes for custom DependsOn links
+    // Check checkboxes for currently active dependencies (inherent and custom)
     const checkboxes = document.querySelectorAll('input[name="drawer-deps"]');
-    const customDeps = active.customDependsOn || [];
+    const activeDeps = active.dependsOn || [];
     checkboxes.forEach(cb => {
-      if (customDeps.includes(cb.value)) {
+      if (activeDeps.includes(cb.value)) {
         cb.checked = true;
       }
     });
@@ -1450,8 +1458,24 @@ ${detailsList}
     const statusVal = document.getElementById("block-status").value;
 
     const selectedDeps = [];
-    const checkboxes = document.querySelectorAll('input[name="drawer-deps"]:checked');
-    checkboxes.forEach(cb => selectedDeps.push(cb.value));
+    const ignoredDeps = [];
+
+    const checkboxes = document.querySelectorAll('input[name="drawer-deps"]');
+    checkboxes.forEach(cb => {
+      const depId = cb.value;
+      const isInherent = cb.getAttribute("data-inherent") === "true";
+      const isChecked = cb.checked;
+
+      if (isChecked) {
+        if (!isInherent) {
+          selectedDeps.push(depId);
+        }
+      } else {
+        if (isInherent) {
+          ignoredDeps.push(depId);
+        }
+      }
+    });
 
     // Save overlay to archDatabase
     const activePlanId = archDatabase.activePlanId;
@@ -1459,11 +1483,12 @@ ${detailsList}
     if (plan) {
       if (!plan.metadata) plan.metadata = {};
       if (!plan.metadata[editingNodeId]) {
-        plan.metadata[editingNodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+        plan.metadata[editingNodeId] = { layer: "", status: "", customDependsOn: [], ignoredDependsOn: [], customTasks: [], taskStates: {} };
       }
       plan.metadata[editingNodeId].layer = layerVal;
       plan.metadata[editingNodeId].status = statusVal;
       plan.metadata[editingNodeId].customDependsOn = selectedDeps;
+      plan.metadata[editingNodeId].ignoredDependsOn = ignoredDeps;
     }
 
     await savePlannerOverlay();

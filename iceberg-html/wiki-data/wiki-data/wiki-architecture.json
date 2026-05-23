@@ -166,9 +166,22 @@
         "3124",
         "3361",
         "1958",
-        "3285"
+        "3285",
+        "1880",
+        "2143",
+        "1661"
       ],
       "metadata": {
+        "1661": {
+          "layer": "Maintenance & GC",
+          "status": "complete",
+          "customDependsOn": [
+            "3124"
+          ],
+          "ignoredDependsOn": [],
+          "customTasks": [],
+          "taskStates": {}
+        },
         "1958": {
           "layer": "Row-Level Ops",
           "status": "complete",
@@ -187,6 +200,16 @@
           "customTasks": [],
           "taskStates": {}
         },
+        "3130": {
+          "layer": "Row-Level Ops",
+          "status": "planned",
+          "customDependsOn": [],
+          "ignoredDependsOn": [
+            "3124"
+          ],
+          "customTasks": [],
+          "taskStates": {}
+        },
         "3131": {
           "layer": "Row-Level Ops",
           "status": "planned",
@@ -194,7 +217,10 @@
             "3320"
           ],
           "customTasks": [],
-          "taskStates": {}
+          "taskStates": {},
+          "ignoredDependsOn": [
+            "3124"
+          ]
         },
         "3285": {
           "layer": "Row-Level Ops",
