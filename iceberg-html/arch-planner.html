@@ -89,6 +89,15 @@
           <g id="dag-nodes"></g>
         </svg>
         
+        <!-- Sleek welcoming blank canvas guide overlay -->
+        <div id="blank-canvas-message" style="position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; background: rgba(250, 249, 245, 0.75); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 5; text-align: center; padding: 24px; pointer-events: none; transition: opacity 0.3s ease;">
+          <span style="font-size: 42px; margin-bottom: 12px; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.04));">🕸️</span>
+          <h3 style="margin: 0 0 8px; font-family: var(--serif); font-weight: 500; font-size: 19px; color: var(--slate); letter-spacing: -0.01em;">Your DAG Canvas is Blank</h3>
+          <p style="margin: 0; font-size: 12.5px; color: var(--g700); max-width: 440px; line-height: 1.55; font-family: var(--sans);">
+            This architectural plan is currently empty. Use the <strong>➕ ADD ISSUE/PR</strong> bar below to search, filter, and iteratively add components to build your custom sub-DAG!
+          </p>
+        </div>
+
         <!-- Sleek visual legend Overlay inside DAG map -->
         <div style="position: absolute; bottom: 12px; left: 12px; background: rgba(250, 249, 245, 0.9); backdrop-filter: blur(8px); padding: 10px 14px; border-radius: 8px; border: 1.5px solid var(--g300); display: flex; flex-direction: column; gap: 4px; font-size: 10px; font-family: var(--sans); pointer-events: none; z-index: 10;">
           <div style="font-weight: bold; color: var(--slate); margin-bottom: 2px;">Visual Legend</div>
@@ -132,7 +141,17 @@
 
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" id="node-adder-container">
           <span style="font-size: 11px; font-weight: 800; color: var(--slate); font-family: var(--sans); letter-spacing: 0.05em;">➕ ADD ISSUE/PR:</span>
-          <select id="add-node-select" class="matrix-filter-select" style="min-width: 220px; font-size: 11px; height: 32px;">
+          <input type="text" id="add-node-search" class="matrix-search-input" style="width: 140px; height: 32px; font-size: 11px; margin: 0;" placeholder="Search number/title..." oninput="updatePlanToolbarControls()">
+          <select id="add-node-filter-binding" class="matrix-filter-select" style="height: 32px; font-size: 11px; color: var(--slate);" onchange="updatePlanToolbarControls()">
+            <option value="all">All Bindings</option>
+            <option value="core">Core Spec</option>
+            <option value="java">Java</option>
+            <option value="python">Python</option>
+            <option value="rust">Rust</option>
+            <option value="go">Go</option>
+            <option value="cpp">C++</option>
+          </select>
+          <select id="add-node-select" class="matrix-filter-select" style="min-width: 240px; max-width: 320px; font-size: 11px; height: 32px;">
             <!-- Populated dynamically -->
           </select>
           <button class="btn btn-clay" style="padding: 0 12px; height: 32px; font-size: 11.5px;" onclick="addNodeToActivePlan()">
@@ -418,14 +437,32 @@
 
   // Ensures archDatabase contains the savedPlans schema and handles legacy migration cleanly
   function alignPlannerDatabaseSchema() {
-    if (!archDatabase.savedPlans) {
-      // Gather any legacy overlays mapped directly under integer keys
+    if (!archDatabase || typeof archDatabase !== "object" || Array.isArray(archDatabase) || !archDatabase.savedPlans) {
+      // Gather any legacy overlays
       const legacyMetadata = {};
-      Object.keys(archDatabase).forEach(key => {
-        if (String(parseInt(key)) === key) {
-          legacyMetadata[key] = archDatabase[key];
-        }
-      });
+      if (Array.isArray(archDatabase)) {
+        archDatabase.forEach(item => {
+          if (item && item.id) {
+            legacyMetadata[item.id] = {
+              layer: item.layer || "Catalog Operations",
+              status: item.status || "planned",
+              customDependsOn: item.dependsOn || [],
+              customTasks: (item.tasks || []).map(t => ({
+                id: t.id || `custom-task-${Date.now()}-${Math.random()}`,
+                text: t.text || "",
+                completed: t.completed || false
+              })),
+              taskStates: {}
+            };
+          }
+        });
+      } else if (archDatabase && typeof archDatabase === "object") {
+        Object.keys(archDatabase).forEach(key => {
+          if (String(parseInt(key)) === key) {
+            legacyMetadata[key] = archDatabase[key];
+          }
+        });
+      }
 
       archDatabase = {
         savedPlans: {
@@ -578,6 +615,16 @@
     tbody.innerHTML = "";
 
     let filtered = plannerNodes;
+
+    // Toggle blank canvas overlay
+    const blankMsg = document.getElementById("blank-canvas-message");
+    if (blankMsg) {
+      if (filtered.length === 0 && archDatabase.activePlanId !== "full-collection") {
+        blankMsg.style.display = "flex";
+      } else {
+        blankMsg.style.display = "none";
+      }
+    }
 
     // Apply Filter constraints
     if (searchVal) {
@@ -901,6 +948,12 @@
 
   function tickSimulation() {
     if (!isSimulating) return;
+
+    if (simulationNodes.length === 0) {
+      isSimulating = false;
+      drawSVGGraph();
+      return;
+    }
 
     const width = 800;
     const height = 400;
@@ -1331,6 +1384,13 @@ ${detailsList}
   async function switchActivePlan(planId) {
     archDatabase.activePlanId = planId;
     selectedNodeId = null;
+
+    // Reset adder search & binding filters
+    const searchInput = document.getElementById("add-node-search");
+    const bindingSelect = document.getElementById("add-node-filter-binding");
+    if (searchInput) searchInput.value = "";
+    if (bindingSelect) bindingSelect.value = "all";
+
     await savePlannerOverlay();
     
     // Pick first node as selected default
@@ -1446,15 +1506,38 @@ ${detailsList}
       // Populate nodes NOT in active plan
       if (nodeSelect) {
         nodeSelect.innerHTML = "";
-        const remaining = ghDatabase.filter(item => !plan.nodes.includes(item.number));
+        
+        // Read input search and binding filter
+        const searchInput = document.getElementById("add-node-search");
+        const bindingSelect = document.getElementById("add-node-filter-binding");
+        
+        const searchQuery = searchInput ? searchInput.value.toLowerCase().trim() : "";
+        const bindingFilter = bindingSelect ? bindingSelect.value : "all";
+
+        let remaining = ghDatabase.filter(item => !plan.nodes.includes(item.number));
+
+        // Filter by binding
+        if (bindingFilter !== "all") {
+          remaining = remaining.filter(item => (item.binding || "core") === bindingFilter);
+        }
+
+        // Filter by keyword query
+        if (searchQuery) {
+          remaining = remaining.filter(item => 
+            item.number.includes(searchQuery) ||
+            item.title.toLowerCase().includes(searchQuery) ||
+            (item.body || "").toLowerCase().includes(searchQuery)
+          );
+        }
 
         if (remaining.length === 0) {
-          nodeSelect.innerHTML = `<option value="">All issues/PRs added to plan</option>`;
+          nodeSelect.innerHTML = `<option value="">No matching issues/PRs</option>`;
         } else {
-          // Sort remaining alphabetically
-          remaining.sort((a, b) => a.title.localeCompare(b.title));
+          // Sort remaining numerically by number descending (newer first)
+          remaining.sort((a, b) => parseInt(b.number) - parseInt(a.number));
+          
           remaining.forEach(item => {
-            nodeSelect.innerHTML += `<option value="${item.number}">#${item.number}: ${item.title.substring(0, 45)}...</option>`;
+            nodeSelect.innerHTML += `<option value="${item.number}">#${item.number} (${item.binding.toUpperCase()}): ${item.title.substring(0, 45)}...</option>`;
           });
         }
       }
