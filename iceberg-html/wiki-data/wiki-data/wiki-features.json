@@ -193,7 +193,7 @@
     ],
     "bindings": {
       "java": "complete",
-      "python": "complete",
+      "python": "in-progress",
       "rust": "complete",
       "go": "in-progress",
       "cpp": "planned",
@@ -353,7 +353,7 @@
     ],
     "bindings": {
       "java": "complete",
-      "python": "planned",
+      "python": "in-progress",
       "rust": "planned",
       "go": "planned",
       "cpp": "planned",

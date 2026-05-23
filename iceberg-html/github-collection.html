@@ -54,7 +54,7 @@
           <div id="panel-manual" style="display: none;">
             <div class="input-group">
               <label for="man-number">Resource Number / ID</label>
-              <input type="text" id="man-number" class="input-control" placeholder="e.g. 9280">
+              <input type="text" id="man-number" class="input-control" placeholder="e.g. 9280" oninput="checkManualNumberExists(this.value)">
             </div>
             <div class="input-group">
               <label for="man-title">Title</label>
@@ -107,7 +107,7 @@
               <label for="man-body">Description (use #number references)</label>
               <textarea id="man-body" class="input-control" style="min-height: 80px; resize: vertical;" placeholder="e.g. Closes #9201. Resolves nanosecond spec support."></textarea>
             </div>
-            <button class="btn" style="width: 100%; justify-content: center; font-size: 13px; font-weight: 600;" onclick="addManualResource()">
+            <button id="btn-manual-submit" class="btn" style="width: 100%; justify-content: center; font-size: 13px; font-weight: 600;" onclick="addManualResource()">
               Register Custom Item
             </button>
           </div>
@@ -283,6 +283,168 @@
       document.getElementById("tab-manual").classList.toggle("active", tab === "manual");
       document.getElementById("panel-fetch").style.display = tab === "fetch" ? "block" : "none";
       document.getElementById("panel-manual").style.display = tab === "manual" ? "block" : "none";
+
+      if (tab === "manual") {
+        const numberVal = document.getElementById("man-number").value.trim();
+        const submitBtn = document.getElementById("btn-manual-submit");
+        if (submitBtn) {
+          if (numberVal && ghDatabase.some(item => String(item.number) === numberVal)) {
+            submitBtn.innerHTML = `💾 Update Resource #${numberVal}`;
+          } else {
+            submitBtn.innerHTML = "Register Custom Item";
+          }
+        }
+      }
+    }
+
+    // Dynamic checks if entered manual ID already exists to transition button mode
+    function checkManualNumberExists(val) {
+      const numVal = val.replace("#", "").trim();
+      const submitBtn = document.getElementById("btn-manual-submit");
+      if (submitBtn) {
+        if (numVal && ghDatabase.some(item => String(item.number) === numVal)) {
+          submitBtn.innerHTML = `💾 Update Resource #${numVal}`;
+        } else {
+          submitBtn.innerHTML = "Register Custom Item";
+        }
+      }
+    }
+
+    // Edit selected resource by populating it inside the manual entry form
+    function editActiveResource() {
+      const active = ghDatabase.find(item => String(item.number) === selectedNumber);
+      if (!active) return;
+
+      // Populate Manual Entry form fields
+      document.getElementById("man-number").value = active.number;
+      document.getElementById("man-title").value = active.title;
+      document.getElementById("man-type").value = active.type;
+      document.getElementById("man-state").value = active.state;
+      document.getElementById("man-binding").value = active.binding || "core";
+      document.getElementById("man-author").value = active.author || "";
+      document.getElementById("man-body").value = active.body || "";
+
+      // Trigger type/state change logic to show/hide the closed reason dropdown
+      toggleManualStateReason();
+
+      if (active.type === "issue" && active.state === "closed" && active.stateReason) {
+        document.getElementById("man-state-reason").value = active.stateReason;
+      }
+
+      // Switch to manual entry tab
+      switchInputTab("manual");
+
+      // Update button text to reflect Edit mode
+      const submitBtn = document.getElementById("btn-manual-submit");
+      if (submitBtn) {
+        submitBtn.innerHTML = `💾 Update Resource #${active.number}`;
+      }
+    }
+
+    // Refresh an existing resource from the GitHub API using its saved URL
+    async function refreshResourceFromGitHub(number) {
+      const active = ghDatabase.find(item => String(item.number) === String(number));
+      if (!active) return;
+
+      const errorDiv = document.getElementById("fetch-error");
+      const loader = document.getElementById("fetch-loader");
+      
+      if (errorDiv) errorDiv.style.display = "none";
+      if (loader) {
+        loader.textContent = `Refreshing #${number} from GitHub API...`;
+        loader.style.display = "block";
+      }
+
+      const urlToFetch = active.url;
+      const parsed = parseGitHubURL(urlToFetch);
+      if (!parsed) {
+        if (loader) loader.style.display = "none";
+        alert("Cannot refresh: This resource does not have a valid GitHub URL associated.");
+        return;
+      }
+
+      const { owner, repo, number: parsedNumber, isDiscussion } = parsed;
+
+      if (isDiscussion) {
+        if (loader) loader.style.display = "none";
+        alert("GitHub Discussions require authenticated GraphQL, so they cannot be refreshed dynamically via REST. You can edit them manually.");
+        return;
+      }
+
+      try {
+        const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${parsedNumber}`);
+        
+        if (response.status === 403) {
+          throw new Error("GitHub API Rate-limit exceeded. Try again in an hour or update manually.");
+        }
+        if (!response.ok) {
+          throw new Error(`GitHub resource not found (#${parsedNumber} in ${owner}/${repo}).`);
+        }
+
+        const data = await response.json();
+        let itemType = active.type;
+        let itemState = data.state;
+
+        if (data.pull_request) {
+          itemType = "pr";
+          try {
+            const prResp = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${parsedNumber}`);
+            if (prResp.ok) {
+              const prData = await prResp.json();
+              if (prData.merged) {
+                itemState = "merged";
+              } else {
+                itemState = prData.state;
+              }
+            }
+          } catch (e) {
+            // keep standard state
+          }
+        } else {
+          itemType = "issue";
+        }
+
+        let stateReason = null;
+        if (itemType === "issue" && itemState === "closed") {
+          let closedByBot = false;
+          if (data.closed_by && (data.closed_by.type === "Bot" || data.closed_by.login.toLowerCase().includes("bot") || data.closed_by.login.toLowerCase().includes("-actions"))) {
+            closedByBot = true;
+          }
+          
+          if (closedByBot) {
+            stateReason = "bot";
+          } else if (data.state_reason === "not_planned") {
+            stateReason = "not_planned";
+          } else {
+            stateReason = "completed";
+          }
+        }
+
+        // Update active resource parameters in-place
+        active.title = data.title;
+        active.type = itemType;
+        active.state = itemState;
+        active.stateReason = stateReason;
+        active.author = data.user.login;
+        active.body = data.body || "";
+        active.url = data.html_url || urlToFetch;
+
+        // Auto-detect binding if not set or "core"
+        if (!active.binding || active.binding === "core") {
+          active.binding = detectBinding(active.url, active.title, active.body);
+        }
+
+        rebuildRelationships();
+        await saveCollection();
+        renderBoard();
+        selectResource(active.number);
+
+        if (loader) loader.style.display = "none";
+        alert(`Successfully refreshed Resource #${number} from GitHub!`);
+      } catch (err) {
+        if (loader) loader.style.display = "none";
+        alert(`Refresh failed: ${err.message}`);
+      }
     }
 
     // Extract public issue number/slug from link
@@ -525,6 +687,12 @@
       // Reset state reason selection
       document.getElementById("man-state-reason").value = "completed";
       document.getElementById("group-man-state-reason").style.display = "none";
+
+      // Reset button text
+      const submitBtn = document.getElementById("btn-manual-submit");
+      if (submitBtn) {
+        submitBtn.innerHTML = "Register Custom Item";
+      }
     }
 
     // Helper regex engine to compile Outgoing & Incoming bidirectional vectors
@@ -648,8 +816,14 @@
               <span style="color: var(--g500); font-family: var(--mono); font-weight: bold;">#${item.number}</span> 
               ${item.title}
             </h2>
-            <div style="display: flex; gap: 8px;">
+            <div style="display: flex; gap: 8px; align-items: center;">
               <span class="badge-status ${stateClass}">${stateLabel}</span>
+              <button class="btn" style="padding: 4px 10px; font-size: 11px; background: transparent; border-color: var(--clay); color: var(--clay); font-weight: 600;" onclick="editActiveResource()">
+                ✏️ Edit Details
+              </button>
+              <button class="btn" style="padding: 4px 10px; font-size: 11px; background: transparent; border-color: var(--slate); color: var(--slate); font-weight: 600;" onclick="refreshResourceFromGitHub('${item.number}')" title="Re-query public GitHub API to sync status, title, author and description body.">
+                🔄 Refresh API
+              </button>
               <a href="${item.url}" target="_blank" class="btn" style="padding: 4px 10px; font-size: 11px; background: transparent; border-color: var(--slate); color: var(--slate); text-decoration: none;">
                 View on GitHub ↗
               </a>
