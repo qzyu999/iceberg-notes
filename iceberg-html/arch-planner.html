@@ -58,7 +58,7 @@
       </div>
 
       <div id="github-dag-container" style="width: 100%; border: 1.5px solid var(--slate); border-radius: 12px; background: var(--paper); overflow: hidden; position: relative; box-shadow: 0 4px 12px rgba(20,20,19,0.02);">
-        <svg id="dag-svg" width="100%" height="400" viewBox="0 0 800 400" style="display: block;">
+        <svg id="dag-svg" width="100%" height="500" viewBox="0 0 800 500" style="display: block;">
           <defs>
             <!-- Grid pattern -->
             <pattern id="dag-grid" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -720,6 +720,39 @@
     const customTasks = active.customTasks || [];
     const totalTasks = [...bodyTasks, ...customTasks];
 
+    // Compile Upstream (Prerequisites)
+    const upstreamIds = active.dependsOn || [];
+    const upstreamNodes = plannerNodes.filter(n => upstreamIds.includes(n.id));
+    
+    let upstreamHTML = "";
+    if (upstreamNodes.length === 0) {
+      upstreamHTML = `<span style="font-size: 11.5px; color: var(--g500); font-style: italic;">No prerequisite links detected</span>`;
+    } else {
+      upstreamHTML = upstreamNodes.map(dep => `
+        <div onclick="selectAndFocusNode('${dep.id}')" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-radius: 6px; border: 1.5px solid var(--g200); background: var(--paper); cursor: pointer; transition: all 0.15s ease; font-size: 11.5px; font-weight: 500;" onmouseover="this.style.borderColor='var(--clay)'; this.style.transform='translateY(-1.5px)';" onmouseout="this.style.borderColor='var(--g200)'; this.style.transform='none';">
+          <span style="font-family: var(--mono); font-weight: bold; color: var(--clay);">#${dep.id}</span>
+          <span style="flex: 1; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--slate); text-align: left;" title="${dep.title}">${dep.title}</span>
+          <span class="badge-status ${dep.status}" style="font-size: 8.5px; padding: 1px 4px; margin-left: 6px;">${dep.status}</span>
+        </div>
+      `).join("");
+    }
+
+    // Compile Downstream (Dependents)
+    const downstreamNodes = plannerNodes.filter(n => (n.dependsOn || []).includes(active.id));
+    
+    let downstreamHTML = "";
+    if (downstreamNodes.length === 0) {
+      downstreamHTML = `<span style="font-size: 11.5px; color: var(--g500); font-style: italic;">No other nodes depend on this item</span>`;
+    } else {
+      downstreamHTML = downstreamNodes.map(dep => `
+        <div onclick="selectAndFocusNode('${dep.id}')" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-radius: 6px; border: 1.5px solid var(--g200); background: var(--paper); cursor: pointer; transition: all 0.15s ease; font-size: 11.5px; font-weight: 500;" onmouseover="this.style.borderColor='var(--olive)'; this.style.transform='translateY(-1.5px)';" onmouseout="this.style.borderColor='var(--g200)'; this.style.transform='none';">
+          <span style="font-family: var(--mono); font-weight: bold; color: var(--olive);">#${dep.id}</span>
+          <span style="flex: 1; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--slate); text-align: left;" title="${dep.title}">${dep.title}</span>
+          <span class="badge-status ${dep.status}" style="font-size: 8.5px; padding: 1px 4px; margin-left: 6px;">${dep.status}</span>
+        </div>
+      `).join("");
+    }
+
     let checklistHTML = "";
     if (totalTasks.length === 0) {
       checklistHTML = `<div style="font-size: 12.5px; color: var(--g500); font-style: italic; text-align: center; padding: 12px 0;">No tasks found. Parse checklists inside description body or add manual checklist items below.</div>`;
@@ -770,6 +803,28 @@
         </div>
       </div>
 
+      <!-- Directed Dependency Flow Lane -->
+      <div style="margin-top: 18px; border-top: 1.5px solid var(--g200); padding-top: 14px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div>
+            <div class="nav-category" style="border-bottom: none; margin-bottom: 6px; font-size: 11px; font-weight: bold; letter-spacing: 0.05em; color: var(--clay); display: flex; align-items: center; gap: 4px;">
+              <span>◀️ Upstream Prerequisites</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              ${upstreamHTML}
+            </div>
+          </div>
+          <div>
+            <div class="nav-category" style="border-bottom: none; margin-bottom: 6px; font-size: 11px; font-weight: bold; letter-spacing: 0.05em; color: var(--olive); display: flex; align-items: center; gap: 4px;">
+              <span>▶️ Downstream Dependents</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              ${downstreamHTML}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Section: Dynamic Unified Roadmap Checklist Card -->
       <div style="margin-top: 18px;">
         <div class="nav-category" style="border-bottom: none; margin-bottom: 6px; font-size: 11px; font-weight: bold; letter-spacing: 0.05em;">
@@ -812,6 +867,17 @@
     const completed = total.filter(t => t.completed).length;
     const percent = Math.round((completed / total.length) * 100);
     ratioSpan.textContent = `${completed}/${total.length} (${percent}%)`;
+  }
+
+  function selectAndFocusNode(id) {
+    selectedNodeId = String(id);
+    renderPlanner();
+    
+    // Highlight and scroll the active list row into view
+    const activeRow = document.querySelector("#arch-list-body .active-row");
+    if (activeRow) {
+      activeRow.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
   }
 
   // 4. Checklist Actions
@@ -907,7 +973,7 @@
     }
 
     const width = 800;
-    const height = 400;
+    const height = 500;
 
     const idMap = new Map();
     simulationNodes = filteredItems.map((item, idx) => {
@@ -969,10 +1035,10 @@
     }
 
     const width = 800;
-    const height = 400;
+    const height = 500;
 
     // 1. Repulsion force pushing nodes apart
-    const kRepel = 3200;
+    const kRepel = 8000;
     for (let i = 0; i < simulationNodes.length; i++) {
       const nodeA = simulationNodes[i];
       for (let j = i + 1; j < simulationNodes.length; j++) {
@@ -996,7 +1062,7 @@
 
     // 2. Spring attraction along links pulling connected nodes together
     const kAttract = 0.05;
-    const restLength = 110;
+    const restLength = 150;
     simulationLinks.forEach(link => {
       const nodeA = link.source;
       const nodeB = link.target;
@@ -1021,7 +1087,7 @@
     });
 
     const kLayering = 0.08;
-    const kGravityY = 0.04;
+    const kGravityY = 0.02;
     const centerY = height / 2;
     const hMargin = 80;
 
@@ -1071,14 +1137,14 @@
     const rect = svg.getBoundingClientRect();
 
     const scaleX = 800 / rect.width;
-    const scaleY = 400 / rect.height;
+    const scaleY = 500 / rect.height;
 
     function handleMouseMove(e) {
       if (!draggedNode) return;
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
       draggedNode.fx = Math.max(20, Math.min(780, x));
-      draggedNode.fy = Math.max(20, Math.min(380, y));
+      draggedNode.fy = Math.max(20, Math.min(480, y));
     }
 
     function handleMouseUp() {
