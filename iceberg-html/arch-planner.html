@@ -1203,9 +1203,32 @@
     });
 
     const kLayering = 0.08;
-    const kGravityY = 0.02;
+    const kGravityY = 0.025;
+    const kGroupCohesion = 0.02; // Gentle intra-group attraction
     const centerY = height / 2;
     const hMargin = 80;
+
+    // Collect all unique non-empty visualGroups
+    const uniqueGroups = [...new Set(simulationNodes.map(n => n.visualGroup).filter(g => g))];
+    
+    // Calculate centroids of each group for intra-group cohesion
+    const groupCentroids = {};
+    const groupCounts = {};
+    simulationNodes.forEach(node => {
+      if (node.visualGroup) {
+        if (!groupCentroids[node.visualGroup]) {
+          groupCentroids[node.visualGroup] = { x: 0, y: 0 };
+          groupCounts[node.visualGroup] = 0;
+        }
+        groupCentroids[node.visualGroup].x += node.x;
+        groupCentroids[node.visualGroup].y += node.y;
+        groupCounts[node.visualGroup]++;
+      }
+    });
+    Object.keys(groupCentroids).forEach(gName => {
+      groupCentroids[gName].x /= groupCounts[gName];
+      groupCentroids[gName].y /= groupCounts[gName];
+    });
 
     simulationNodes.forEach(node => {
       if (node.fx === null) {
@@ -1215,9 +1238,29 @@
           : width / 2;
         node.vx += (targetX - node.x) * kLayering;
 
-        // Pull towards vertical center
-        const dy = centerY - node.y;
+        // Determine target Y based on visualGroup vertical distribution
+        let targetY = centerY;
+        if (node.visualGroup && uniqueGroups.length > 0) {
+          const gIdx = uniqueGroups.indexOf(node.visualGroup);
+          const paddingY = 90;
+          const availableHeight = height - 2 * paddingY;
+          if (uniqueGroups.length === 1) {
+            targetY = centerY;
+          } else {
+            targetY = paddingY + (gIdx / (uniqueGroups.length - 1)) * availableHeight;
+          }
+        }
+        
+        // Pull towards target Y lane
+        const dy = targetY - node.y;
         node.vy += dy * kGravityY;
+
+        // Apply intra-group cohesion to cluster group nodes tightly
+        if (node.visualGroup && groupCentroids[node.visualGroup]) {
+          const centroid = groupCentroids[node.visualGroup];
+          node.vx += (centroid.x - node.x) * kGroupCohesion;
+          node.vy += (centroid.y - node.y) * kGroupCohesion;
+        }
       }
     });
 
