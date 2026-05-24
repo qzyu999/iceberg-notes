@@ -175,7 +175,7 @@
       "metadata": {
         "1661": {
           "layer": "Maintenance & GC",
-          "status": "complete",
+          "status": "blocked",
           "customDependsOn": [
             "3124"
           ],
@@ -185,16 +185,17 @@
         },
         "1958": {
           "layer": "Row-Level Ops",
-          "status": "complete",
+          "status": "blocked",
           "customDependsOn": [
             "3124"
           ],
           "customTasks": [],
-          "taskStates": {}
+          "taskStates": {},
+          "ignoredDependsOn": []
         },
         "2822": {
           "layer": "Catalog Operations",
-          "status": "complete",
+          "status": "blocked",
           "customDependsOn": [
             "3285"
           ],

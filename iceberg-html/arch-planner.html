@@ -605,8 +605,14 @@
         }
 
         let defaultStatus = "planned";
-        if (item.state === "merged" || item.state === "closed") {
+        if (item.state === "merged") {
           defaultStatus = "complete";
+        } else if (item.state === "closed") {
+          if (item.type === "pr") {
+            defaultStatus = "blocked"; // A closed PR was rejected/unmerged, so mark it blocked/incomplete
+          } else {
+            defaultStatus = "complete"; // A closed issue/discussion is usually resolved
+          }
         } else if (item.state === "open" && (item.body || "").includes("- [x]")) {
           defaultStatus = "in-progress";
         }
