@@ -610,6 +610,8 @@
         } else if (item.state === "closed") {
           if (item.type === "pr") {
             defaultStatus = "blocked"; // A closed PR was rejected/unmerged, so mark it blocked/incomplete
+          } else if (item.stateReason === "not_planned" || item.stateReason === "bot" || item.stateReason === "not planned") {
+            defaultStatus = "planned"; // Closed as not planned means it's not complete, default to planned
           } else {
             defaultStatus = "complete"; // A closed issue/discussion is usually resolved
           }
