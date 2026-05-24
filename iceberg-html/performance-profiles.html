@@ -136,6 +136,134 @@ function switchRecipeTab(recipeId, version) {
         <li><code>file_sequence_number</code>: The sequence number of the commit that added the file to the table metadata.</li>
       </ul>
 
+      <h4>A. Under the Hood: The Physical-to-Logical Storage Hierarchy</h4>
+      <p>
+        To understand how Iceberg tracks these files in cloud storage (e.g., S3, GCS, or ADLS), we must distinguish between <strong>Metadata Files</strong> (which coordinate table state) and <strong>Physical Data/Delete Files</strong> (which hold actual records).
+      </p>
+
+      <pre style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 16px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--g800); overflow-x: auto;">
+[CLOUD OBJECT STORAGE BUCKET]
+ ├── metadata/
+ │    ├── v3.metadata.json           &lt;-- Root Pointer: Tracks snapshots and schemas
+ │    ├── snap-8902.manifest-list    &lt;-- Manifest List (Avro): Tracks manifest file paths
+ │    ├── manifest-data.avro         &lt;-- Manifest File (Avro): Lists active Data Files
+ │    └── manifest-deletes.avro      &lt;-- Manifest File (Avro): Lists active Delete Files
+ └── data/
+      ├── partition_x=1/
+      │    ├── data-001.parquet      &lt;-- Physical DATA File (Parquet)
+      │    └── pos-delete-001.parquet&lt;-- Physical POSITION DELETES File (Parquet)
+      └── partition_x=2/
+           └── eq-delete-001.parquet &lt;-- Physical EQUALITY DELETES File (Parquet)
+      </pre>
+
+      <p>
+        When a reader scans an Iceberg table, it goes through this structure:
+      </p>
+      <ol style="margin-bottom: 24px;">
+        <li>Loads the current **Metadata JSON** to find the active snapshot ID and its corresponding **Manifest List** file.</li>
+        <li>Parses the **Manifest List** (an Avro file) which returns a list of active **Manifest Files**, annotated with whether they contain <code>data</code> or <code>deletes</code> (stored in the <code>content</code> field of the manifest file record).</li>
+        <li>Parses the relevant **Manifest Files** (Avro files) to scan their individual **Manifest Entries** under the hood.</li>
+      </ol>
+
+      <h4>B. Binary Manifest Entries on Disk</h4>
+      <p>
+        Under the hood, a **Manifest File** is stored as a binary **Apache Avro** file containing a serialized array of manifest entry records. A manifest entry acts as an envelope wrapping the physical file's properties and column statistics. 
+      </p>
+      <p>
+        Here is exactly what these serialized Avro records look like in storage for the three different content types:
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 24px; margin-bottom: 32px;">
+        
+        <!-- 1. DATA ENTRY -->
+        <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; overflow: hidden;">
+          <div style="background: var(--g100); border-bottom: 1.5px solid var(--g300); padding: 8px 16px; font-family: var(--mono); font-size: 11px; font-weight: bold; color: var(--slate); display: flex; justify-content: space-between; align-items: center;">
+            <span>Avro Record: Manifest Entry wrapping a DATA File</span>
+            <span class="badge supported" style="font-size: 9.5px; padding: 2px 6px;">DATA (content=0)</span>
+          </div>
+          <pre style="margin: 0; padding: 16px; font-family: var(--mono); font-size: 11.5px; line-height: 1.45; overflow-x: auto; color: var(--g800);"><code>{
+  "status": 1,                       // 0: EXISTING, 1: ADDED, 2: DELETED
+  "snapshot_id": 890213084920,       // Snapshot that added this file
+  "sequence_number": 12,             // Table data sequence number at commit
+  "file_sequence_number": 12,        // Sequence number when file was registered
+  "data_file": {
+    "content": 0,                    // 0 = DATA
+    "file_path": "s3://bucket/data/partition_x=1/data-001.parquet",
+    "file_format": "PARQUET",
+    "partition": { "partition_x": 1 },
+    "record_count": 150000,
+    "file_size_in_bytes": 12450892,
+    "column_sizes": { "1": 420842, "2": 8054922 },
+    "value_counts": { "1": 150000, "2": 150000 },
+    "null_value_counts": { "1": 0, "2": 1420 },
+    "lower_bounds": { "1": "0x00000065", "2": "0x416c696365" }, // Hex lower bounds
+    "upper_bounds": { "1": "0x000000ff", "2": "0x5a61636861" }  // Hex upper bounds
+  }
+}</code></pre>
+        </div>
+
+        <!-- 2. POSITION DELETES ENTRY -->
+        <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; overflow: hidden;">
+          <div style="background: var(--g100); border-bottom: 1.5px solid var(--g300); padding: 8px 16px; font-family: var(--mono); font-size: 11px; font-weight: bold; color: var(--clay); display: flex; justify-content: space-between; align-items: center;">
+            <span>Avro Record: Manifest Entry wrapping a POSITION DELETES File</span>
+            <span class="badge partial" style="font-size: 9.5px; padding: 2px 6px;">POSITION DELETES (content=1)</span>
+          </div>
+          <pre style="margin: 0; padding: 16px; font-family: var(--mono); font-size: 11.5px; line-height: 1.45; overflow-x: auto; color: var(--g800);"><code>{
+  "status": 1,                       // ADDED
+  "snapshot_id": 890213084920,
+  "sequence_number": 15,             // Must be >= sequence_number of referenced data file
+  "file_sequence_number": 15,
+  "data_file": {
+    "content": 1,                    // 1 = POSITION DELETES
+    "file_path": "s3://bucket/data/partition_x=1/pos-delete-001.parquet",
+    "file_format": "PARQUET",
+    "partition": { "partition_x": 1 },
+    "record_count": 42,              // Exactly 42 rows have been deleted in partition_x=1
+    "file_size_in_bytes": 3542,
+    "value_counts": { "100": 42, "101": 42 },
+    "null_value_counts": { "100": 0, "101": 0 },
+    "lower_bounds": {
+      "100": "s3://bucket/data/partition_x=1/data-001.parquet", // Min referenced file path
+      "101": "0x0000000000000002"                               // Min deleted row index offset (2)
+    },
+    "upper_bounds": {
+      "100": "s3://bucket/data/partition_x=1/data-001.parquet", // Max referenced file path
+      "101": "0x0000000000018a0f"                               // Max deleted row index offset (100879)
+    }
+  }
+}</code></pre>
+        </div>
+
+        <!-- 3. EQUALITY DELETES ENTRY -->
+        <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; overflow: hidden;">
+          <div style="background: var(--g100); border-bottom: 1.5px solid var(--g300); padding: 8px 16px; font-family: var(--mono); font-size: 11px; font-weight: bold; color: var(--olive); display: flex; justify-content: space-between; align-items: center;">
+            <span>Avro Record: Manifest Entry wrapping an EQUALITY DELETES File</span>
+            <span class="badge supported" style="background: var(--olive-l); border-color: var(--olive); color: var(--olive); font-size: 9.5px; padding: 2px 6px;">EQUALITY DELETES (content=2)</span>
+          </div>
+          <pre style="margin: 0; padding: 16px; font-family: var(--mono); font-size: 11.5px; line-height: 1.45; overflow-x: auto; color: var(--g800);"><code>{
+  "status": 1,                       // ADDED
+  "snapshot_id": 890213084920,
+  "sequence_number": 16,             // Must be > sequence_number of referenced data files
+  "file_sequence_number": 16,
+  "data_file": {
+    "content": 2,                    // 2 = EQUALITY DELETES
+    "file_path": "s3://bucket/data/partition_x=2/eq-delete-001.parquet",
+    "file_format": "PARQUET",
+    "partition": { "partition_x": 2 },
+    "equality_ids": [1],             // Indicates deletion is matching columns with Table ID = 1 (e.g. 'id')
+    "record_count": 3,               // Exactly 3 deleted keys written
+    "file_size_in_bytes": 1054,
+    "column_sizes": { "1": 24 },
+    "value_counts": { "1": 3 },
+    "null_value_counts": { "1": 0 },
+    "lower_bounds": { "1": "0x00000068" }, // Min deleted primary key value (104)
+    "upper_bounds": { "1": "0x000000c8" }  // Max deleted primary key value (200)
+  }
+}</code></pre>
+        </div>
+
+      </div>
+
       <h3>3. Depth Analysis: Position vs. Equality Deletes</h3>
       <p>
         When executing Merge-on-Read, the write engine can write deletions using either <strong>Position Deletes</strong> or <strong>Equality Deletes</strong>. These represent diametrically opposed structural strategies and trade-offs.
