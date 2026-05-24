@@ -285,11 +285,66 @@ function switchRecipeTab(recipeId, version) {
         $$F_{p, k}(d) = \{ f \in F_{p, k} \mid \text{Seq}(d) \le \text{Seq}(f) \}$$
         $$F_{e, k}(d) = \{ f \in F_{e, k} \mid \text{Seq}(d) < \text{Seq}(f) \}$$
       </p>
+
+      <!-- EXPLANATION OF <= vs < -->
+      <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 18px; margin-top: 16px; margin-bottom: 24px; display: flex; flex-direction: column; gap: 12px; border-left: 4px solid var(--clay);">
+        <div style="font-family: var(--sans); font-size: 13.5px; font-weight: bold; color: var(--slate);">Why does position gating use $\le$ while equality gating uses strictly $<$?</div>
+        
+        <div style="font-size: 12.5px; line-height: 1.5; color: var(--g700);">
+          <strong>• Position Deletes ($\text{Seq}(d) \le \text{Seq}(f_{\text{pos}})$)</strong>
+          <br>Position deletes refer to precise physical file locations (file path and row index). Because they are tied to a specific file, it is impossible for them to delete rows in files that don't exist yet. They can be safely written in the <strong>same transaction</strong> that created the data file (e.g. during a Spark <code>MERGE INTO</code> commit), meaning their sequence numbers can be equal ($\text{Seq}(d) = \text{Seq}(f_{\text{pos}}$).
+        </div>
+
+        <div style="font-size: 12.5px; line-height: 1.5; color: var(--g700);">
+          <strong>• Equality Deletes ($\text{Seq}(d) < \text{Seq}(f_{\text{eq}})$)</strong>
+          <br>Equality deletes are global, value-based delete rules (e.g., <em>"delete any row where id = 2"</em>). They do not target a specific file. In streaming pipelines (e.g. Flink), a single commit transaction often writes both a new data file (containing <code>id=2</code>) and an equality delete (deleting <code>id=2</code>). If equal sequence numbers were allowed, the delete rule would immediately suppress the <strong>newly inserted row in the same transaction</strong>! The strict inequality ($\text{Seq}(d) < \text{Seq}(f_{\text{eq}}$) ensures that equality deletes only apply to data files committed <strong>before</strong> the delete transaction was committed.
+        </div>
+      </div>
+
       <p>
         And the filtering predicates are defined as:
         $$\text{PassesPosDeletes}(r, F_{p, k}(d)) \iff \forall f \in F_{p, k}(d), \quad (r.\text{path}, r.\text{pos}) \notin \text{ReadPosDeletes}(f)$$
         $$\text{PassesEqDeletes}(r, F_{e, k}(d)) \iff \forall f \in F_{e, k}(d), \forall v_{\text{del}} \in \text{ReadEqDeletes}(f), \exists c \in f.\text{equality\_ids} \text{ s.t. } r.\text{val}[c] \neq v_{\text{del}}[c]$$
       </p>
+
+      <!-- PLAIN ENGLISH TRANSLATION TABLE -->
+      <div class="parity-table-container" style="margin-top: 16px; margin-bottom: 24px;">
+        <div style="font-family: var(--mono); font-size: 11px; font-weight: bold; color: var(--slate); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Formula Translation Reference</div>
+        <table class="parity-table" style="width: 100%; font-size: 12px; line-height: 1.45;">
+          <thead>
+            <tr>
+              <th style="width: 35%;">Mathematical Equation</th>
+              <th style="width: 65%;">Plain English Translation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>$R_{\text{active}} = \bigcup_{d \in D_k} \Psi(d)$</strong></td>
+              <td>The final set of active rows in the table is found by going through every single active data file ($D_k$), filtering out its deleted rows using the collapse function ($\Psi$), and uniting the remaining active rows.</td>
+            </tr>
+            <tr>
+              <td><strong>$\Psi(d)$ filters using $F_{p, k}(d)$ &amp; $F_{e, k}(d)$</strong></td>
+              <td>For a given data file, only read rows that pass **both** the position delete checks and the equality delete checks that apply to this file.</td>
+            </tr>
+            <tr>
+              <td><strong>$\text{Seq}(d) \le \text{Seq}(f_{\text{pos}})$</strong></td>
+              <td>A position delete file applies to a data file if the delete file was committed **at the same time or after** the data file was committed.</td>
+            </tr>
+            <tr>
+              <td><strong>$\text{Seq}(d) < \text{Seq}(f_{\text{eq}})$</strong></td>
+              <td>An equality delete file applies to a data file only if the delete file was committed **strictly after** the data file was committed.</td>
+            </tr>
+            <tr>
+              <td><strong>$(r.\text{path}, r.\text{pos}) \notin \text{ReadPosDeletes}(f)$</strong></td>
+              <td>A row passes the position delete check if its physical file path and row number (line offset) are **not** listed in the applicable position delete files.</td>
+            </tr>
+            <tr>
+              <td><strong>$r.\text{val}[c] \neq v_{\text{del}}[c]$</strong></td>
+              <td>A row passes the equality delete check if its key column values do **not** match any of the deleted values stored inside the applicable equality delete files.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <!-- COLLAPSE SIMULATOR EXAMPLE WALKTHROUGH -->
       <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 24px; margin-top: 24px; margin-bottom: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
