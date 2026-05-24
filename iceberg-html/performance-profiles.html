@@ -535,6 +535,24 @@ function switchRecipeTab(recipeId, version) {
         </li>
       </ul>
 
+      <h4>C. Implementation Nuance: Row Ordering &amp; The Streaming Two-Pointer Sweep</h4>
+      <p>
+        While relational SQL theory treats tables and unions as unordered sets, real-world query engines (like Apache Spark and Flink) and the Iceberg Java/Rust reader implementations leverage a vital physical invariant: **Row Order Preservation**.
+      </p>
+      <p>
+        If the table schema specifies a sort order, the data files are written with records sorted according to those sort keys. When reading these files, preserving this physical ordering is critical to avoid expensive downstream sorting operations in the execution plan. The Iceberg Java library guarantees this through two elegant design patterns:
+      </p>
+      <ul>
+        <li style="margin-bottom: 8px;">
+          <strong>Position Delete Streaming Sweep ($O(N)$ Merge):</strong>
+          The Iceberg V2 specification mandates that **position deletes inside the Parquet files must be written sorted** by <code>file_path</code> and <code>pos</code> in ascending order. Since the reader streams data rows sequentially from disk (implicitly sorted by position <code>0, 1, 2...</code>), the engine does not need to load all position deletes into memory. It maintains a single pointer in the data stream and a single pointer in the position delete stream, executing a **two-pointer streaming sweep (like a merge-join)**. This keeps the execution memory footprint to a minimal $O(1)$ stream buffer while perfectly preserving row order.
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Vectorized Batch Skipping:</strong>
+          In vectorized Parquet readers (e.g. using Apache Arrow or Spark's vectorized reader), position deletes are loaded into an in-memory sorted array or bitmap. Because the offsets are sorted, the reader can completely skip reading entire block groups or pages of the Parquet column file if their offsets match a contiguous run of deleted rows, preserving physical alignment and maximum IO throughput without row-by-row decompression.
+        </li>
+      </ul>
+
       <h3>4. Sequence Number Applicability Invariants</h3>
       <p>
         To prevent a delete from erroneously suppressing rows committed *after* the delete was executed, Iceberg scan planning enforces precise mathematical invariants regarding **Sequence Number Gating**. 
