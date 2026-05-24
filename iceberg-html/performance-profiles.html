@@ -264,6 +264,144 @@ function switchRecipeTab(recipeId, version) {
 
       </div>
 
+      <h4>C. Reconstitution Operator &amp; Transactional Collapse Proof</h4>
+      <p>
+        To prove that this distributed collection of physical files collapsing under a simple scan reconstructs the exact mathematically correct data product, let us formally define the **Reconstitution Operator ($\Psi$)**.
+      </p>
+      <p>
+        Let the active physical layout in snapshot $S_k$ consist of data files $D_k$, position delete files $F_{p, k}$, and equality delete files $F_{e, k}$.
+        Every data file $d \in D_k$ is a set of physical rows $d = \{ r = (d.\text{path}, i, \text{val}_r) \}$, where $i \in [0, \text{record\_count} - 1]$ is the absolute row offset, and $\text{val}_r$ is the record's values.
+      </p>
+      <p>
+        The final logical active dataset $R_{\text{active}}$ is defined as the union of the collapse function applied to each data file:
+        $$R_{\text{active}} = \bigcup_{d \in D_k} \Psi(d)$$
+      </p>
+      <p>
+        The reconstitution operator $\Psi(d)$ filters out deleted rows from data file $d$ by applying the sequence-gated position deletes $F_{p, k}(d)$ and equality deletes $F_{e, k}(d)$:
+        $$\Psi(d) = \{ r \in d \mid \text{PassesPosDeletes}(r, F_{p, k}(d)) \land \text{PassesEqDeletes}(r, F_{e, k}(d)) \}$$
+      </p>
+      <p>
+        Where the gated sets are bounded strictly by the sequence number invariants:
+        $$F_{p, k}(d) = \{ f \in F_{p, k} \mid \text{Seq}(d) \le \text{Seq}(f) \}$$
+        $$F_{e, k}(d) = \{ f \in F_{e, k} \mid \text{Seq}(d) < \text{Seq}(f) \}$$
+      </p>
+      <p>
+        And the filtering predicates are defined as:
+        $$\text{PassesPosDeletes}(r, F_{p, k}(d)) \iff \forall f \in F_{p, k}(d), \quad (r.\text{path}, r.\text{pos}) \notin \text{ReadPosDeletes}(f)$$
+        $$\text{PassesEqDeletes}(r, F_{e, k}(d)) \iff \forall f \in F_{e, k}(d), \forall v_{\text{del}} \in \text{ReadEqDeletes}(f), \exists c \in f.\text{equality\_ids} \text{ s.t. } r.\text{val}[c] \neq v_{\text{del}}[c]$$
+      </p>
+
+      <!-- COLLAPSE SIMULATOR EXAMPLE WALKTHROUGH -->
+      <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 24px; margin-top: 24px; margin-bottom: 32px; box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
+        <div style="font-family: var(--mono); font-size: 11px; font-weight: bold; color: var(--clay); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Formal Proof Trace</div>
+        <h4 style="margin-top: 0; margin-bottom: 12px; font-family: var(--sans); font-size: 16px; font-weight: bold; color: var(--slate);">Mathematical Walkthrough: Reconstructing Snapshot 3</h4>
+        <p style="font-size: 13px; line-height: 1.5; color: var(--g700); margin-bottom: 16px;">
+          Let us trace the evolution of an active table state across three snapshots to prove how the sequence constraints prevent data loss and resolve logical queries perfectly.
+        </p>
+
+        <!-- Chronology Cards -->
+        <div style="display: flex; flex-direction: column; gap: 16px; font-size: 12.5px;">
+          
+          <!-- Step 1 -->
+          <div style="border-left: 3px solid var(--slate); padding-left: 12px;">
+            <strong style="color: var(--slate);">Snapshot 1 (Commit Sequence = 10):</strong> Base Ingest
+            <ul style="margin: 4px 0 0; padding-left: 20px; color: var(--g700);">
+              <li>Writes data file <code style="font-family: var(--mono); font-size: 11px;">data_1.parquet</code> ($\text{Seq}=10$) holding:
+                <br>&nbsp;&nbsp;• Row 0: <code style="font-family: var(--mono); font-size: 11px;">(id=1, name="Alice")</code>
+                <br>&nbsp;&nbsp;• Row 1: <code style="font-family: var(--mono); font-size: 11px;">(id=2, name="Bob")</code>
+                <br>&nbsp;&nbsp;• Row 2: <code style="font-family: var(--mono); font-size: 11px;">(id=3, name="Charlie")</code>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Step 2 -->
+          <div style="border-left: 3px solid var(--olive); padding-left: 12px;">
+            <strong style="color: var(--olive);">Snapshot 2 (Commit Sequence = 11):</strong> CDC Delete Bob &amp; Insert David
+            <ul style="margin: 4px 0 0; padding-left: 20px; color: var(--g700);">
+              <li>Writes data file <code style="font-family: var(--mono); font-size: 11px;">data_2.parquet</code> ($\text{Seq}=11$) holding <code style="font-family: var(--mono); font-size: 11px;">(id=4, name="David")</code>.</li>
+              <li>Writes equality delete <code style="font-family: var(--mono); font-size: 11px;">eq_delete_1.parquet</code> ($\text{Seq}=11$, <code style="font-family: var(--mono); font-size: 11px;">equality_ids = [1]</code>) holding value <code style="font-family: var(--mono); font-size: 11px;">[2]</code> (intended to delete Bob).</li>
+            </ul>
+          </div>
+
+          <!-- Step 3 -->
+          <div style="border-left: 3px solid var(--clay); padding-left: 12px;">
+            <strong style="color: var(--clay);">Snapshot 3 (Commit Sequence = 12):</strong> MERGE Transaction: Delete Charlie &amp; Insert new Bob ("Robert")
+            <ul style="margin: 4px 0 0; padding-left: 20px; color: var(--g700);">
+              <li>Writes data file <code style="font-family: var(--mono); font-size: 11px;">data_3.parquet</code> ($\text{Seq}=12$) holding <code style="font-family: var(--mono); font-size: 11px;">(id=2, name="Robert")</code>.</li>
+              <li>Writes position delete <code style="font-family: var(--mono); font-size: 11px;">pos_delete_1.parquet</code> ($\text{Seq}=12$) targeting <code style="font-family: var(--mono); font-size: 11px;">(data_1.parquet, row 2)</code> (deleting Charlie).</li>
+            </ul>
+          </div>
+
+        </div>
+
+        <h5 style="margin-top: 20px; margin-bottom: 8px; font-size: 13.5px; font-weight: bold; color: var(--slate);">Applying the Collapse Operator $\Psi$ during Scan Planning:</h5>
+        <p style="font-size: 12.5px; line-height: 1.5; color: var(--g700); margin-bottom: 12px;">
+          When executing the query, the reader engine evaluates the collapse invariants for each data file:
+        </p>
+
+        <!-- Evaluation Table -->
+        <div class="parity-table-container" style="border: 1px solid var(--g300); border-radius: 6px; overflow: hidden; margin-bottom: 16px;">
+          <table class="parity-table" style="width: 100%; border-collapse: collapse; font-size: 11.5px; text-align: left;">
+            <thead>
+              <tr style="background: var(--g100); border-bottom: 2px solid var(--g300);">
+                <th style="padding: 8px 12px;">Target Data File</th>
+                <th style="padding: 8px 12px;">Applicable Deletes</th>
+                <th style="padding: 8px 12px;">Gating Proof Rule</th>
+                <th style="padding: 8px 12px;">Logical Output Rows</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom: 1px solid var(--g200);">
+                <td style="padding: 8px 12px; font-weight: bold;"><code style="font-family: var(--mono); font-size: 11px;">data_1.parquet</code><br>($\text{Seq}=10$)</td>
+                <td style="padding: 8px 12px;">
+                  1. <code style="font-family: var(--mono); font-size: 11px;">eq_delete_1</code> ($\text{Seq}=11$, key=<code style="font-family: var(--mono); font-size: 11px;">id=2</code>)
+                  <br>2. <code style="font-family: var(--mono); font-size: 11px;">pos_delete_1</code> ($\text{Seq}=12$, row=<code style="font-family: var(--mono); font-size: 11px;">pos 2</code>)
+                </td>
+                <td style="padding: 8px 12px;">
+                  • $\text{Seq}(d_1) = 10 &lt; \text{Seq}(f_{\text{eq}}) = 11$ (Applies!)
+                  <br>• $\text{Seq}(d_1) = 10 \le \text{Seq}(f_{\text{pos}}) = 12$ (Applies!)
+                </td>
+                <td style="padding: 8px 12px; font-weight: bold; color: var(--olive);">
+                  <code>(id=1, name="Alice")</code>
+                  <br><span style="text-decoration: line-through; opacity: 0.4; font-weight: normal;">Bob &amp; Charlie pruned!</span>
+                </td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--g200);">
+                <td style="padding: 8px 12px; font-weight: bold;"><code style="font-family: var(--mono); font-size: 11px;">data_2.parquet</code><br>($\text{Seq}=11$)</td>
+                <td style="padding: 8px 12px;">
+                  None
+                </td>
+                <td style="padding: 8px 12px;">
+                  • $\text{Seq}(d_2) = 11 \not&lt; \text{Seq}(f_{\text{eq}}) = 11$ (Gated!)
+                  <br>• $\text{Seq}(d_2) = 11 \not\le \text{Seq}(f_{\text{pos}})$ path
+                </td>
+                <td style="padding: 8px 12px; font-weight: bold; color: var(--olive);">
+                  <code>(id=4, name="David")</code>
+                </td>
+              </tr>
+              <tr style="border-bottom: 1px solid var(--g200);">
+                <td style="padding: 8px 12px; font-weight: bold;"><code style="font-family: var(--mono); font-size: 11px;">data_3.parquet</code><br>($\text{Seq}=12$)</td>
+                <td style="padding: 8px 12px;">
+                  None
+                </td>
+                <td style="padding: 8px 12px;">
+                  • $\text{Seq}(d_3) = 12 \not&lt; \text{Seq}(f_{\text{eq}}) = 11$ (Gated!)
+                  <br>• $\text{Seq}(d_3) = 12 \not\le \text{Seq}(f_{\text{pos}})$ path
+                </td>
+                <td style="padding: 8px 12px; font-weight: bold; color: var(--olive);">
+                  <code>(id=2, name="Robert")</code>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="background: var(--g100); border: 1px solid var(--g300); border-radius: 6px; padding: 12px; font-size: 12.5px; line-height: 1.45; color: var(--slate);">
+          <strong>💡 Critical Gating Proof: Why Robert Survives</strong>
+          <br>Notice that Robert has <code style="font-family: var(--mono); font-size: 11px;">id=2</code>, which matches the equality delete criterion in <code style="font-family: var(--mono); font-size: 11px;">eq_delete_1</code>. However, because $\text{Seq}(d_3) = 12$ is **strictly greater** than the equality delete's sequence number ($\text{Seq}(f_{\text{eq}}) = 11$), the collapse operator's strict inequality rule ($\text{Seq}(d) &lt; \text{Seq}(f_{\text{eq}})$) filters the delete out. This ensures Robert survives, yielding the exact correct state: **Alice**, **David**, and **Robert**.
+        </div>
+      </div>
+
       <h3>3. Depth Analysis: Position vs. Equality Deletes</h3>
       <p>
         When executing Merge-on-Read, the write engine can write deletions using either <strong>Position Deletes</strong> or <strong>Equality Deletes</strong>. These represent diametrically opposed structural strategies and trade-offs.
