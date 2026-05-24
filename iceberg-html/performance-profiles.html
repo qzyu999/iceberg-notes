@@ -319,7 +319,7 @@ function switchRecipeTab(recipeId, version) {
             <strong style="color: var(--olive);">Snapshot 2 (Commit Sequence = 11):</strong> CDC Delete Bob &amp; Insert David
             <ul style="margin: 4px 0 0; padding-left: 20px; color: var(--g700);">
               <li>Writes data file <code style="font-family: var(--mono); font-size: 11px;">data_2.parquet</code> ($\text{Seq}=11$) holding <code style="font-family: var(--mono); font-size: 11px;">(id=4, name="David")</code>.</li>
-              <li>Writes equality delete <code style="font-family: var(--mono); font-size: 11px;">eq_delete_1.parquet</code> ($\text{Seq}=11$, <code style="font-family: var(--mono); font-size: 11px;">equality_ids = [1]</code>) holding value <code style="font-family: var(--mono); font-size: 11px;">[2]</code> (intended to delete Bob).</li>
+              <li>Writes equality delete <code style="font-family: var(--mono); font-size: 11px;">eq_delete_1.parquet</code> ($\text{Seq}=11$) which registers metadata <code style="font-family: var(--mono); font-size: 11px;">equality_ids = [1]</code> in the manifest entry. In the table's active schema, Field ID <code style="font-family: var(--mono); font-size: 11px;">1</code> corresponds to column <code style="font-family: var(--mono); font-size: 11px;">id</code>. The physical Parquet file itself contains a column for ID <code style="font-family: var(--mono); font-size: 11px;">1</code> storing the row record <code style="font-family: var(--mono); font-size: 11px;">2</code>. The reader engine resolves this mapping under the hood to generate the logical filter predicate: <code style="font-family: var(--mono); font-size: 11px;">id = 2</code> (intended to delete Bob).</li>
             </ul>
           </div>
 
@@ -430,9 +430,47 @@ function switchRecipeTab(recipeId, version) {
         An Equality Delete File specifies deleted rows based on matching column values. Each row in an equality delete file contains values for a subset of the table's schema columns, accompanied by manifest-level metadata:
       </p>
       <pre><code>135: list<int> equality_ids;  // Field IDs from table schema used to determine row equality</code></pre>
-      <p>
-        For instance, if <code>equality_ids = [1]</code> (where ID 1 corresponds to <code>id</code>), an equality delete row containing <code>[104]</code> will logically invalidate any row in any active data file where <code>id = 104</code>.
-      </p>
+      
+      <!-- DECONSTRUCTION BOX -->
+      <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 20px; margin-top: 16px; margin-bottom: 20px;">
+        <div style="font-family: var(--mono); font-size: 11px; font-weight: bold; color: var(--slate); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">Structural Deconstruction</div>
+        <h5 style="margin-top: 0; margin-bottom: 12px; font-family: var(--sans); font-size: 14.5px; font-weight: bold; color: var(--slate);">How does a Field ID List [1] constitute an "Equality Delete" rule?</h5>
+        
+        <p style="font-size: 12.5px; line-height: 1.5; color: var(--g700); margin-bottom: 12px;">
+          An equality delete does **not** store an SQL string like <code>"id = 104"</code>. Instead, it is structured as a column-matching lookup rule split into two parts: the **Rule Definition** (in manifest metadata) and the **Rule Values** (in the physical Parquet file).
+        </p>
+
+        <div style="display: flex; flex-direction: column; gap: 12px; font-size: 12px; line-height: 1.5; color: var(--g800);">
+          <div style="background: var(--g100); padding: 10px 14px; border-radius: 6px; border-left: 3px solid var(--slate);">
+            <strong>1. The Metadata Rule: <code>equality_ids = [1]</code></strong>
+            <br>The manifest entry declares which columns are the "equality key fields." In our table schema, Field ID <code>1</code> corresponds to the column <code>id</code>. This tells the query engine: <em>"To execute this delete, match rows on their <code>id</code> values."</em>
+          </div>
+
+          <div style="background: var(--g100); padding: 10px 14px; border-radius: 6px; border-left: 3px solid var(--slate);">
+            <strong>2. The Storage Schema: The Physical Parquet Delete File</strong>
+            <br>Because the delete rule only requires matching on column ID <code>1</code>, the writing engine writes a physical Parquet file that **only contains the column for ID 1**. It does not waste space storing any other columns. If we want to delete rows where <code>id = 104</code>, the Parquet file physically contains:
+            <pre style="margin: 6px 0 0; background: var(--paper); border: 1px solid var(--g300); padding: 6px 12px; font-family: var(--mono); font-size: 11px; border-radius: 4px; color: var(--g800);">id (Field ID 1)
+--------------
+104</pre>
+          </div>
+
+          <div style="background: var(--g100); padding: 10px 14px; border-radius: 6px; border-left: 3px solid var(--slate);">
+            <strong>3. The Reading Engine Execution</strong>
+            <br>During scan planning, when reading a record from a data file:
+            <ul style="margin: 4px 0 0; padding-left: 20px;">
+              <li>Extracts the value of the column corresponding to Field ID <code>1</code> (the <code>id</code> column). Let's say the row is <code>(id=104, name="David")</code>, so value is <code>104</code>.</li>
+              <li>Queries the in-memory lookup table of the delete file. Since <code>104</code> is found in the delete file, the engine matches:
+                <br><code style="font-family: var(--mono); font-size: 11px;">row.id == delete_file.id</code> &nbsp;$\rightarrow$&nbsp; <code style="font-family: var(--mono); font-size: 11px;">104 == 104</code> &nbsp;$\rightarrow$&nbsp; <strong>Logical Match: Row is deleted!</strong>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <p style="font-size: 12.5px; line-height: 1.5; color: var(--g700); margin-top: 12px; margin-bottom: 0;">
+          💡 <strong>Multi-Column Composite Keys:</strong> If <code>equality_ids = [1, 2]</code> (where ID 1 is <code>id</code> and ID 2 is <code>category</code>), the Parquet delete file would contain both columns, and a row is only deleted if <strong>both</strong> fields match simultaneously (a composite primary-key deletion).
+        </p>
+      </div>
+
       <ul>
         <li>
           <strong>Write Path Complexity — Low ($O(1)$ append):</strong> The writing engine does not need to locate the original files or positions. It simply writes the keys of the deleted rows to the delete file. This is highly suitable for low-latency streaming ingest (e.g., Flink streaming events directly from Kafka) where reading before writing is unacceptably slow.
