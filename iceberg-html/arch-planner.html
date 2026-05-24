@@ -153,6 +153,7 @@
           <rect width="100%" height="100%" fill="url(#dag-grid)" />
           
           <!-- Group layers for links and nodes -->
+          <g id="dag-groups"></g>
           <g id="dag-links"></g>
           <g id="dag-nodes"></g>
         </svg>
@@ -380,6 +381,11 @@
   </div>
 
   <div class="drawer-form-group">
+    <label for="block-visual-group">Visual Grouping (Custom Subgraph Name)</label>
+    <input type="text" id="block-visual-group" class="matrix-search-input" style="width: 100%; box-sizing: border-box; margin: 4px 0 0;" placeholder="e.g. Deletion Vectors">
+  </div>
+
+  <div class="drawer-form-group">
     <label>Extra Prerequisites (Depends On)</label>
     <div class="checkbox-grid" id="drawer-deps-list">
       <!-- Checked checkboxes injected dynamically -->
@@ -546,7 +552,8 @@
                 text: t.text || "",
                 completed: t.completed || false
               })),
-              taskStates: {}
+              taskStates: {},
+              visualGroup: item.visualGroup || null
             };
           }
         });
@@ -621,6 +628,7 @@
 
         const layer = overlay.layer || defaultLayer;
         const status = overlay.status || defaultStatus;
+        const visualGroup = overlay.visualGroup || null;
         const customDependsOn = overlay.customDependsOn || [];
         const ignoredDependsOn = overlay.ignoredDependsOn || [];
         const customTasks = overlay.customTasks || [];
@@ -659,6 +667,7 @@
           url: item.url,
           layer: layer,
           status: status,
+          visualGroup: visualGroup,
           state: item.state,
           stateReason: item.stateReason || item.state_reason || null,
           dependsOn: dependsOn,
@@ -1272,10 +1281,100 @@
     const svg = document.getElementById("dag-svg");
     if (!svg) return;
 
+    const groupGroup = svg.getElementById("dag-groups");
     const linkGroup = svg.getElementById("dag-links");
     const nodeGroup = svg.getElementById("dag-nodes");
 
     if (!linkGroup || !nodeGroup) return;
+
+    // Draw Visual Groups bounding boxes
+    if (groupGroup) {
+      groupGroup.innerHTML = "";
+      
+      // Group simulation nodes by visualGroup name
+      const groups = {};
+      simulationNodes.forEach(node => {
+        if (node.visualGroup) {
+          if (!groups[node.visualGroup]) {
+            groups[node.visualGroup] = [];
+          }
+          groups[node.visualGroup].push(node);
+        }
+      });
+      
+      // Draw a boundary box for each group
+      Object.keys(groups).forEach(groupName => {
+        const nodes = groups[groupName];
+        let minX = Infinity, minY = Infinity;
+        let maxX = -Infinity, maxY = -Infinity;
+        
+        nodes.forEach(node => {
+          if (node.x < minX) minX = node.x;
+          if (node.x > maxX) maxX = node.x;
+          if (node.y < minY) minY = node.y;
+          if (node.y > maxY) maxY = node.y;
+        });
+        
+        const padding = 35;
+        const rectX = minX - padding;
+        const rectY = minY - padding;
+        const rectW = (maxX - minX) + 2 * padding;
+        const rectH = (maxY - minY) + 2 * padding;
+        
+        // Generate a stable color hue based on group name
+        let hash = 0;
+        for (let i = 0; i < groupName.length; i++) {
+          hash = groupName.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const hue = Math.abs(hash % 360);
+        
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        
+        // Bounding rect
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", rectX);
+        rect.setAttribute("y", rectY);
+        rect.setAttribute("width", rectW);
+        rect.setAttribute("height", rectH);
+        rect.setAttribute("rx", "12");
+        rect.setAttribute("ry", "12");
+        rect.setAttribute("fill", `hsla(${hue}, 50%, 94%, 0.45)`);
+        rect.setAttribute("stroke", `hsla(${hue}, 60%, 40%, 0.7)`);
+        rect.setAttribute("stroke-width", "2");
+        rect.setAttribute("stroke-dasharray", "6,4");
+        
+        g.appendChild(rect);
+        
+        // Group title label background pill
+        const labelWidth = groupName.length * 6.5 + 16;
+        const labelBg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        labelBg.setAttribute("x", rectX + 10);
+        labelBg.setAttribute("y", rectY - 12);
+        labelBg.setAttribute("width", labelWidth);
+        labelBg.setAttribute("height", "18");
+        labelBg.setAttribute("rx", "5");
+        labelBg.setAttribute("ry", "5");
+        labelBg.setAttribute("fill", `hsla(${hue}, 60%, 40%, 1)`);
+        
+        g.appendChild(labelBg);
+        
+        // Group title label text
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("x", rectX + 10 + labelWidth / 2);
+        label.setAttribute("y", rectY + 1);
+        label.setAttribute("text-anchor", "middle");
+        label.setAttribute("fill", "var(--paper)");
+        label.setAttribute("font-size", "9px");
+        label.setAttribute("font-weight", "800");
+        label.setAttribute("font-family", "var(--sans)");
+        label.setAttribute("letter-spacing", "0.05em");
+        label.textContent = groupName.toUpperCase();
+        
+        g.appendChild(label);
+        
+        groupGroup.appendChild(g);
+      });
+    }
 
     // Draw Edges (reference lines)
     linkGroup.innerHTML = "";
@@ -1652,6 +1751,7 @@ ${detailsList}
     const active = plannerNodes.find(b => b.id === nodeId);
     document.getElementById("block-layer").value = active.layer;
     document.getElementById("block-status").value = active.status;
+    document.getElementById("block-visual-group").value = active.visualGroup || "";
 
     // Check checkboxes for currently active dependencies (inherent and custom)
     const checkboxes = document.querySelectorAll('input[name="drawer-deps"]');
@@ -1677,6 +1777,7 @@ ${detailsList}
 
     const layerVal = document.getElementById("block-layer").value;
     const statusVal = document.getElementById("block-status").value;
+    const visualGroupVal = document.getElementById("block-visual-group").value.trim();
 
     const selectedDeps = [];
     const ignoredDeps = [];
@@ -1704,10 +1805,11 @@ ${detailsList}
     if (plan) {
       if (!plan.metadata) plan.metadata = {};
       if (!plan.metadata[editingNodeId]) {
-        plan.metadata[editingNodeId] = { layer: "", status: "", customDependsOn: [], ignoredDependsOn: [], customTasks: [], taskStates: {} };
+        plan.metadata[editingNodeId] = { layer: "", status: "", customDependsOn: [], ignoredDependsOn: [], customTasks: [], taskStates: {}, visualGroup: null };
       }
       plan.metadata[editingNodeId].layer = layerVal;
       plan.metadata[editingNodeId].status = statusVal;
+      plan.metadata[editingNodeId].visualGroup = visualGroupVal || null;
       plan.metadata[editingNodeId].customDependsOn = selectedDeps;
       plan.metadata[editingNodeId].ignoredDependsOn = ignoredDeps;
     }
