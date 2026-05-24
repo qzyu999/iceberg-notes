@@ -58,12 +58,12 @@ function switchRecipeTab(recipeId, version) {
     <section id="cow-vs-mor">
       <h2>IV. Copy-on-Write vs. Merge-on-Read Performance Mechanics</h2>
       <p class="sec-desc">
-        Iceberg allows administrators to tune tables precisely between read-optimized Copy-on-Write and write-optimized Merge-on-Read performance profiles.
+        Iceberg allows administrators to tune tables precisely between read-optimized Copy-on-Write (CoW) and write-optimized Merge-on-Read (MoR) performance profiles. The fundamental tradeoff lies in shifting the compute/IO penalty of mutations from write-time to query-time.
       </p>
 
-      <h3>1. Write/Read Amplification Equations</h3>
+      <h3>1. Mathematical Formulations of CoW and MoR</h3>
       <p>
-        Let $D_{\text{target}}$ be the set of data files targeted for mutations, $R_{\text{mut}}$ be the records physically modified, and $R_{\text{total}}$ be the total rows in $D_{\text{target}}$.
+        Let $D_{\text{target}}$ be the set of data files targeted for mutations, $R_{\text{mut}}$ be the set of records physically modified, and $R_{\text{total}}$ be the total set of rows residing in $D_{\text{target}}$.
       </p>
 
       <div class="equation-box">
@@ -72,7 +72,8 @@ function switchRecipeTab(recipeId, version) {
           $$\text{WAF}_{\text{CoW}} = \frac{\sum_{d \in D_{\text{target}}} \text{SizeOf}(d)}{\text{SizeOf}(R_{\text{mut}})} \approx \frac{\text{SizeOf}(R_{\text{total}})}{\text{SizeOf}(R_{\text{mut}})} \quad , \quad \text{RAF}_{\text{CoW}} = 1.0$$
         </div>
         <div class="eq-explanation">
-          COW forces an eager rewrite of the entire target data file to apply modifications. This leads to extremely high Write Amplification ($\text{WAF}_{\text{CoW}}$) but keeps Read Amplification ($\text{RAF}_{\text{CoW}}$) at a perfect $1.0$.
+          <strong>Write Amplification Factor ($\text{WAF}$):</strong> In CoW, any row update or deletion forces an eager rewrite of the entire target data file containing that row. Thus, $\text{WAF}_{\text{CoW}}$ is proportional to the average file size divided by the mutated record size. For a 128 MB file where 1 row is mutated, the amplification is $O(10^6)$.
+          <br><strong>Read Amplification Factor ($\text{RAF}$):</strong> Because all modifications are fully merged into the physical files at commit time, reading requires no runtime joining. Hence, $\text{RAF}_{\text{CoW}}$ remains at a perfect $1.0$.
         </div>
       </div>
 
@@ -82,23 +83,149 @@ function switchRecipeTab(recipeId, version) {
           $$\text{WAF}_{\text{MoR}} = \frac{\text{SizeOf}(F_{\text{del}})}{\text{SizeOf}(R_{\text{mut}})} \approx O(1) \quad , \quad \text{RAF}_{\text{MoR}} = \frac{\sum_{d \in D} \text{I/O}(d) + \sum_{f \in F_{\text{del}}} \text{I/O}(f)}{\sum_{d \in D} \text{I/O}(d)} > 1.0$$
         </div>
         <div class="eq-explanation">
-          MOR appends deletes as a small metadata log file ($F_{\text{del}}$), leaving original data files untouched. This yields near-zero write amplification but increases the read amplification penalty ($\text{RAF}_{\text{MoR}}$) during multi-file scans.
+          <strong>Write Amplification Factor ($\text{WAF}$):</strong> In MoR, mutations are appended to separate delta log files ($F_{\text{del}}$), leaving original data files completely untouched. This reduces $\text{WAF}_{\text{MoR}}$ to near-zero ($O(1)$ relative to write payload size).
+          <br><strong>Read Amplification Factor ($\text{RAF}$):</strong> Queries must dynamically merge the base data files ($D$) and active delete files ($F_{\text{del}}$), performing run-time reconciliation. This induces a CPU and IO read amplification penalty ($\text{RAF}_{\text{MoR}} > 1.0$), making reads slower.
         </div>
       </div>
 
-      <h3>2. Shannon Entropy Limits &amp; Deletion Vector Roaring Containers</h3>
+      <h3>2. Format V2 Specification &amp; Manifest Structural Evolution</h3>
       <p>
-        To minimize network RTT and object storage space, Deletion Vectors compress row offsets using **Roaring Bitmaps**. Under Shannon's information theory, the minimum average number of bits required to represent $M$ deleted offsets in a file of $N$ rows is bounded by the entropy:
+        Format Version 1 (V1) tables only support Copy-on-Write mutations, as all manifest entries reference only **Data Files**.
+        Format Version 2 (V2) introduces native Merge-on-Read through the addition of **Delete Files** ($F_{\text{del}}$). 
+        To distinguish these file types, the V2 manifest entry schema evolves the nested <code>data_file</code> struct by introducing the <code>content</code> field:
+      </p>
+
+      <div class="parity-table-container">
+        <table class="parity-table">
+          <thead>
+            <tr>
+              <th>Content Value</th>
+              <th>Enumerated Name</th>
+              <th>Description</th>
+              <th>Format Compatibility</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>0</code></td>
+              <td><strong>DATA</strong></td>
+              <td>Physical data file containing active user records.</td>
+              <td>V1 &amp; V2 Specs</td>
+            </tr>
+            <tr>
+              <td><code>1</code></td>
+              <td><strong>POSITION DELETES</strong></td>
+              <td>File identifying deleted rows by file path and relative row offset.</td>
+              <td>V2 Spec Only</td>
+            </tr>
+            <tr>
+              <td><code>2</code></td>
+              <td><strong>EQUALITY DELETES</strong></td>
+              <td>File identifying deleted rows by the values of one or more primary keys.</td>
+              <td>V2 Spec Only</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        Additionally, V2 manifests add two vital metadata fields to each entry to govern correct state tracking:
+      </p>
+      <ul>
+        <li><code>sequence_number</code>: A table-level monotonically increasing sequence tracking the logical time when the data or delete file was committed.</li>
+        <li><code>file_sequence_number</code>: The sequence number of the commit that added the file to the table metadata.</li>
+      </ul>
+
+      <h3>3. Depth Analysis: Position vs. Equality Deletes</h3>
+      <p>
+        When executing Merge-on-Read, the write engine can write deletions using either <strong>Position Deletes</strong> or <strong>Equality Deletes</strong>. These represent diametrically opposed structural strategies and trade-offs.
+      </p>
+
+      <h4>A. Position Deletes</h4>
+      <p>
+        A Position Delete File tracks exact coordinates of deleted records. Each row in a position delete file has the following schema:
+      </p>
+      <pre><code>struct position_delete {
+  100: string file_path;      // The absolute URI of the data file containing the deleted row
+  101: long pos;              // The zero-indexed row number within the data file
+  102: struct<...> row;      // (Optional) The original deleted row content (useful for CDC)
+}</code></pre>
+      <ul>
+        <li>
+          <strong>Write Path Complexity — High ($O(\text{Read-before-Write})$):</strong> To write a position delete, the writing engine (e.g., Spark/Flink) must determine the exact physical file path and row number of the record being deleted. This typically requires querying the table's indices or running a join to locate the records, which incurs read-before-write overhead.
+        </li>
+        <li>
+          <strong>Read Path Complexity — Low ($O(N)$ sweep or $O(1)$ set checks):</strong> During query execution, the scan engine loads the position deletes associated with a data file $d$ into an in-memory sorted set or a highly optimized bit array (e.g., a **Roaring Bitmap**). Because position deletes map to exact indices, the reader can perform constant-time $O(1)$ membership checks for each row read, or even directly skip deleted blocks, yielding near-optimal scan performance.
+        </li>
+      </ul>
+
+      <h4>B. Equality Deletes</h4>
+      <p>
+        An Equality Delete File specifies deleted rows based on matching column values. Each row in an equality delete file contains values for a subset of the table's schema columns, accompanied by manifest-level metadata:
+      </p>
+      <pre><code>135: list<int> equality_ids;  // Field IDs from table schema used to determine row equality</code></pre>
+      <p>
+        For instance, if <code>equality_ids = [1]</code> (where ID 1 corresponds to <code>id</code>), an equality delete row containing <code>[104]</code> will logically invalidate any row in any active data file where <code>id = 104</code>.
+      </p>
+      <ul>
+        <li>
+          <strong>Write Path Complexity — Low ($O(1)$ append):</strong> The writing engine does not need to locate the original files or positions. It simply writes the keys of the deleted rows to the delete file. This is highly suitable for low-latency streaming ingest (e.g., Flink streaming events directly from Kafka) where reading before writing is unacceptably slow.
+        </li>
+        <li>
+          <strong>Read Path Complexity — High ($O(M)$ hash tables &amp; scans):</strong> At read time, the reader cannot prune deletes at the row-level in $O(1)$. It must build an in-memory hash join table containing all equality delete key values, and evaluate these predicates against *every single record* read from *all* active data files within the partition. This requires massive memory capacity and incurs a major CPU evaluation penalty, often causing Out-of-Memory (OOM) errors if deletes are uncompacted.
+        </li>
+      </ul>
+
+      <h3>4. Sequence Number Applicability Invariants</h3>
+      <p>
+        To prevent a delete from erroneously suppressing rows committed *after* the delete was executed, Iceberg scan planning enforces precise mathematical invariants regarding **Sequence Number Gating**. 
+      </p>
+      <p>
+        Let $\text{Seq}(d)$ be the data sequence number of data file $d$, and let $\text{Seq}(f)$ be the data sequence number of delete file $f$. A delete file $f$ is applied to a data file $d$ if and only if they belong to the same partition and satisfy the following conditions:
+      </p>
+
+      <div class="equation-box">
+        <div class="eq-label">Invariant 4.1: Position Delete Applicability Constraint</div>
+        <div class="eq-math">
+          $$\text{Apply}(f_{\text{pos}} \to d) \iff \text{Seq}(d) \le \text{Seq}(f_{\text{pos}})$$
+        </div>
+        <div class="eq-explanation">
+          <strong>The Invariant:</strong> A position delete file $f_{\text{pos}}$ applies to data file $d$ if and only if $\text{Seq}(d) \le \text{Seq}(f_{\text{pos}})$. This permits a position delete file to invalidate rows in data files committed in the same transaction (where sequence numbers are equal). This is essential for transactions (like <code>MERGE INTO</code>) that write both new data files and corresponding position deletes simultaneously.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Invariant 4.2: Equality Delete Applicability Constraint</div>
+        <div class="eq-math">
+          $$\text{Apply}(f_{\text{eq}} \to d) \iff \text{Seq}(d) < \text{Seq}(f_{\text{eq}})$$
+        </div>
+        <div class="eq-explanation">
+          <strong>The Invariant:</strong> An equality delete file $f_{\text{eq}}$ applies to data file $d$ if and only if $\text{Seq}(d) < \text{Seq}(f_{\text{eq}})$ (strictly less than). This strictly gates the applicability of equality deletes to older commits. An equality delete does *not* apply to data files added in the same commit transaction. This prevents complex circular lookup dependencies and guarantees that newly appended data rows in a transaction are not immediately suppressed by equality deletes committed concurrently in the same batch.
+        </div>
+      </div>
+
+      <h3>5. Shannon Entropy Limits &amp; Deletion Vector Roaring Containers</h3>
+      <p>
+        To minimize network round-trips (RTT) and object storage footprints, modern engines leverage **Deletion Vectors** to compress position offsets using **Roaring Bitmaps**. Under Shannon's information theory, the minimum average number of bits required to represent $M$ deleted offsets in a file of $N$ rows is bounded by the entropy:
         $$H_{\text{opt}} \approx \log_2 \binom{N}{M}$$
       </p>
       <p>
-        Roaring Bitmaps compress offsets dynamically into $2^{16}$ row-chunk containers:
+        Roaring Bitmaps achieve this limit by partitioning 32-bit integer offsets into chunks of $2^{16}$ rows (sharing the same most-significant 16 bits), and storing them in one of three dynamically selected container layouts:
       </p>
       <ul>
-        <li style="margin-bottom: 6px;"><strong>Array Container:</strong> Used when $M_{\text{chunk}} &lt; 4096$. Stores sorted 16-bit integers ($16\text{ bits/offset}$).</li>
-        <li style="margin-bottom: 6px;"><strong>Bitmap Container:</strong> Used when $M_{\text{chunk}} \ge 4096$. Stores a dense bit array of $2^{16}$ bits ($65536\text{ bits}$ total, yielding $\le 16\text{ bits/offset}$).</li>
-        <li style="margin-bottom: 6px;"><strong>Run-Length Encoding (RLE) Container:</strong> Stores contiguous runs as 16-bit pairs of <code>(start_offset, run_length)</code> ($32\text{ bits/run}$), compressing bulk deletions down to a few bytes.</li>
+        <li style="margin-bottom: 8px;">
+          <strong>Array Container:</strong> Used when the number of deleted rows in the chunk is $M_{\text{chunk}} &lt; 4096$. It stores offsets as a sorted list of 16-bit unsigned integers, consuming exactly $16 \times M_{\text{chunk}}$ bits.
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Bitmap Container:</strong> Used when $M_{\text{chunk}} \ge 4096$. It swaps the representation to a dense bit array of $2^{16}$ bits (exactly $8,192$ bytes), capping the space to $\le 16$ bits per offset.
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Run-Length Encoding (RLE) Container:</strong> Used when deletes are contiguous (e.g., bulk drops or partition truncations). It stores runs as 16-bit pairs of <code>(start_offset, run_length)</code>. This compresses millions of deleted rows into just a few bytes.
+        </li>
       </ul>
+      <p>
+        Under the Format V2 specification, Deletion Vectors can be stored directly within **Puffin files** as binary blobs and mapped via <code>content_offset</code> and <code>content_size_in_bytes</code> in the manifest metadata. This enables engines to perform sub-millisecond row skipping without loading verbose Parquet delete files.
+      </p>
 
       <div class="recipe-container" id="recipe-r4">
         <div class="recipe-header">
