@@ -429,7 +429,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       items: [
         { name: "PR & Issue Explorer", path: "github-collection.html" },
         { name: "Feature Parity Matrix", path: "feature-matrix.html" },
-        { name: "Architectural DAG Builder", path: "arch-planner.html" }
+        { name: "Architectural DAG Builder", path: "arch-planner.html" },
+        { name: "Triage & Review Board", path: "triage-board.html" }
       ]
     },
     {

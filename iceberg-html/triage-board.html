@@ -1,0 +1,798 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iceberg PR &amp; Issue Triage Board — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<script src="wiki.js" defer></script>
+<style>
+  /* Premium Kanban Board Custom Aesthetics */
+  .board {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+    align-items: start;
+    margin-top: 24px;
+  }
+  
+  .col {
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 480px;
+    box-shadow: 0 4px 12px rgba(20,20,19,0.01);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .col[data-col="now"]   { border-top: 3.5px solid var(--clay); }
+  .col[data-col="next"]  { border-top: 3.5px solid var(--olive); }
+  .col[data-col="later"] { border-top: 3.5px solid var(--slate); }
+  .col[data-col="cut"]   { border-top: 3.5px solid var(--g400); }
+  
+  .col.dragover {
+    outline: 2px dashed var(--clay);
+    outline-offset: -6px;
+    background: var(--ivory);
+    transform: scale(1.01);
+    box-shadow: 0 8px 24px rgba(217, 119, 87, 0.08);
+  }
+  
+  .col-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--paper);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 16px 12px;
+    border-bottom: 1.5px solid var(--g200);
+  }
+  
+  .col-head h2 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 18px;
+    margin: 0;
+    color: var(--slate);
+    letter-spacing: -0.01em;
+  }
+  
+  .col-head .count {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--g700);
+    background: var(--g100);
+    border: 1px solid var(--g300);
+    border-radius: 999px;
+    padding: 1px 8px;
+    min-width: 26px;
+    text-align: center;
+    font-weight: bold;
+  }
+  
+  .col-body {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+    min-height: 220px;
+  }
+  
+  .col-foot {
+    border-top: 1.5px solid var(--g200);
+    padding: 10px 16px 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--g600);
+    display: flex;
+    justify-content: space-between;
+    background: var(--ivory);
+  }
+  
+  .col-foot b {
+    color: var(--slate);
+    font-weight: 700;
+  }
+
+  /* contributor ticket card aesthetics */
+  .ticket {
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-radius: 8px;
+    padding: 12px;
+    cursor: grab;
+    user-select: none;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.01);
+  }
+  
+  .ticket:hover {
+    border-color: var(--slate);
+    box-shadow: 0 4px 12px rgba(20,20,19,0.05);
+    transform: translateY(-1.5px);
+  }
+  
+  .ticket:active {
+    cursor: grabbing;
+  }
+  
+  .ticket.dragging {
+    opacity: 0.35;
+    transform: scale(0.96);
+  }
+  
+  .ticket.dim {
+    opacity: 0.15;
+    pointer-events: none;
+  }
+  
+  .ticket-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  
+  .tid {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: bold;
+    color: var(--slate);
+    letter-spacing: 0.01em;
+  }
+  
+  .tag {
+    font-family: var(--mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 999px;
+    padding: 1px 7px 2px;
+    border: 1px solid transparent;
+    font-weight: 700;
+  }
+  
+  .tag-pr { background: #F5E6DE; color: var(--clay-d); border-color: #E8C9BA; }
+  .tag-issue { background: #E8EDE0; color: #5C6F44; border-color: #CFDAC0; }
+  .tag-discussion { background: var(--g100); color: var(--slate); border-color: var(--g300); }
+  
+  .est-pill {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: bold;
+    color: var(--g600);
+    border: 1px solid var(--g300);
+    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--ivory);
+  }
+  
+  .ttitle {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--slate);
+    margin-bottom: 8px;
+    word-break: break-word;
+  }
+  
+  .ticket-bot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  
+  .owner {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--oat);
+    color: var(--slate);
+    border: 1px solid var(--g300);
+    letter-spacing: 0.02em;
+  }
+
+  .gh-state-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .gh-state-open { background: #2ECC71; }
+  .gh-state-merged { background: #9B59B6; }
+  .gh-state-closed { background: #E74C3C; }
+
+  /* Toolbar styling overrides */
+  .triage-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--ivory);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 0;
+    margin-bottom: 16px;
+    border-bottom: 1.5px solid var(--g300);
+    flex-wrap: wrap;
+  }
+  
+  @media (max-width: 1024px) {
+    .board {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+  @media (max-width: 640px) {
+    .board {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 24px;">
+      <div class="eyebrow">Community &amp; Code</div>
+      <h1>PR &amp; Issue <em>Triage Board</em></h1>
+      <p class="tagline">
+        Organize, prioritize, and triage active Apache Iceberg PRs, issues, and client roadmap items. Drag tickets across cycle columns and compile dynamic markdown execution reports.
+      </p>
+      <div style="font-family: var(--mono); font-size: 11px; color: var(--g500); margin-top: 10px;">
+        › Drag tickets between columns to prioritize &nbsp;·&nbsp; click badge tags inside cards to filter by tag type
+      </div>
+    </header>
+
+    <!-- Toolbar Filters Panel -->
+    <div class="triage-toolbar">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1;">
+        <span style="font-size: 11px; font-weight: 800; color: var(--slate); font-family: var(--sans); letter-spacing: 0.05em;">PLAN WORKSPACE:</span>
+        <select id="select-active-plan" class="matrix-filter-select" style="border-color: var(--clay); color: var(--clay); font-weight: 600; min-width: 180px; height: 32px;" onchange="switchActivePlan(this.value)">
+          <!-- Dynamically populated -->
+        </select>
+        
+        <input type="text" id="triage-search" class="matrix-search-input" style="width: 160px; height: 32px; font-size: 11.5px; margin: 0;" placeholder="Search number/title..." oninput="renderBoard()">
+        
+        <select id="filter-binding" class="matrix-filter-select" style="height: 32px;" onchange="renderBoard()">
+          <option value="all">All Bindings</option>
+          <option value="core">Core Spec</option>
+          <option value="java">Java</option>
+          <option value="python">Python</option>
+          <option value="rust">Rust</option>
+          <option value="go">Go</option>
+        </select>
+
+        <select id="filter-layer" class="matrix-filter-select" style="height: 32px;" onchange="renderBoard()">
+          <option value="all">All Layers</option>
+          <option value="Catalog Operations">Catalog Operations</option>
+          <option value="Planning & Scans">Planning & Scans</option>
+          <option value="Row-Level Ops">Row-Level Ops</option>
+          <option value="Transactions">Transactions</option>
+          <option value="Maintenance & GC">Maintenance & GC</option>
+        </select>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <button class="btn" style="background: transparent; border-color: var(--slate); color: var(--slate); padding: 0 12px; height: 32px; font-size: 11.5px;" onclick="resetTriagePlacements()">
+          🔄 Reset best guess
+        </button>
+        <button class="btn btn-clay" id="btn-copy-markdown" style="padding: 0 16px; height: 32px; font-size: 11.5px;" onclick="copyBoardMarkdown()">
+          📋 Copy as markdown
+        </button>
+      </div>
+    </div>
+
+    <!-- Active Filter Indicator Badge -->
+    <div id="filter-badge-container" style="margin-bottom: 12px; display: none; align-items: center; gap: 8px;">
+      <span id="filter-active-pill" style="font-family: var(--mono); font-size: 11px; color: var(--clay-d); background: #F5E6DE; border: 1.5px solid #E8C9BA; border-radius: 999px; padding: 3px 10px; cursor: pointer;" onclick="clearActiveTagFilter()"></span>
+    </div>
+
+    <!-- Drag & Drop Kanban Board -->
+    <div class="board" id="triage-board-element"></div>
+
+    <!-- Shareable Markdown Proposal Area (Hidden by default, holds compiled markdown) -->
+    <div style="display: none;">
+      <textarea id="hidden-markdown-textarea"></textarea>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  // ── Unified State Databases ──
+  let ghDatabase = [];      // Issues/PRs loaded from disk
+  let archDatabase = {};    // Overlays containing plan metadata
+  let boardCards = [];      // Merged cards representing active plan
+  let activeFilterTag = null; // Filter cards by specific tag type (bug, feat, etc)
+  let draggedCardId = null;  // Number id of grabbed card
+
+  const COLUMNS = [
+    { key: 'now',   label: 'Now',   color: 'var(--clay)',   rationale: 'Active reviews, critical spec changes, or blockers needed immediately.' },
+    { key: 'next',  label: 'Next',  color: 'var(--olive)',  rationale: 'Active implementations roadmapped for the current cycle or release.' },
+    { key: 'later', label: 'Later', color: 'var(--slate)',  rationale: 'Planned backlog enhancements or future spec discussions.' },
+    { key: 'cut',   label: 'Cut',   color: 'var(--g400)',   rationale: 'Closed as not planned, rejected, or completed and out of active scope.' }
+  ];
+
+  const ESTIMATE_SCORING = { S: 1, M: 2, L: 4 };
+
+  // Setup offline fallback mock dataset
+  const defaultGitHubCollection = [
+    {
+      number: "9280",
+      title: "Core: Add nanosecond timestamp support to Spec v3",
+      type: "pr",
+      state: "open",
+      binding: "core",
+      author: "aokolnychyi",
+      body: "Implements core spec requirements. Closes #9201. Depends on discussions #9150.",
+      url: "https://github.com/apache/iceberg/pull/9280"
+    },
+    {
+      number: "9250",
+      title: "Python: Implement V3 nanosecond timestamp reads",
+      type: "pr",
+      state: "merged",
+      binding: "python",
+      author: "fokko",
+      body: "Brings Python bindings to parity with core Java changes. Closes #9201.",
+      url: "https://github.com/apache/iceberg/pull/9250"
+    },
+    {
+      number: "9201",
+      title: "Support Nanosecond Timestamp Resolution in Spec v3",
+      type: "issue",
+      state: "open",
+      binding: "core",
+      author: "rdblue",
+      body: "Adds high-precision timestamps to Spec V3. Tracked in discussion #9150.",
+      url: "https://github.com/apache/iceberg/issues/9201"
+    },
+    {
+      number: "9150",
+      title: "Discussions on Timestamp Precision in v3 Specs",
+      type: "discussion",
+      state: "closed",
+      binding: "core",
+      author: "jackye1995",
+      body: "RFC outlining design constraints for higher precision timestamp streams.",
+      url: "https://github.com/apache/iceberg/discussions/9150"
+    },
+    {
+      number: "9120",
+      title: "Core: Fix snapshot expiration boundary checks",
+      type: "issue",
+      state: "closed",
+      binding: "java",
+      author: "jackye1995",
+      body: "Fixes snapshot boundary checks. Resolved by PR #9250.",
+      url: "https://github.com/apache/iceberg/issues/9120"
+    }
+  ];
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    window.addEventListener("wiki-sync-status-changed", async () => {
+      await loadBoardData();
+    });
+    await loadBoardData();
+  });
+
+  async function loadBoardData() {
+    // 1. Load ghDatabase
+    let loadedGH = null;
+    if (window.wikiDirHandle) {
+      loadedGH = await window.readWikiFile("wiki-github-collection.json");
+    }
+    if (!loadedGH) {
+      const cached = localStorage.getItem("wiki-github-collection");
+      if (cached) loadedGH = JSON.parse(cached);
+    }
+    ghDatabase = (loadedGH && loadedGH.length > 0) ? loadedGH : JSON.parse(JSON.stringify(defaultGitHubCollection));
+
+    // 2. Load archDatabase
+    let loadedArch = null;
+    if (window.wikiDirHandle) {
+      loadedArch = await window.readWikiFile("wiki-architecture.json");
+    }
+    if (!loadedArch) {
+      const cached = localStorage.getItem("wiki-architecture-state");
+      if (cached) loadedArch = JSON.parse(cached);
+    }
+    archDatabase = loadedArch || {};
+
+    // 3. Align Database Schema
+    alignDatabaseSchema();
+
+    // 4. Populate plan switcher dropdown
+    populatePlanSwitcher();
+
+    // 5. Render board
+    renderBoard();
+  }
+
+  function alignDatabaseSchema() {
+    if (!archDatabase || typeof archDatabase !== "object" || Array.isArray(archDatabase) || !archDatabase.savedPlans) {
+      archDatabase = {
+        savedPlans: {
+          "full-collection": {
+            name: "Full Collection Roadmap",
+            nodes: ghDatabase.map(item => item.number),
+            metadata: {}
+          }
+        },
+        activePlanId: "full-collection"
+      };
+    }
+    if (archDatabase.savedPlans["full-collection"]) {
+      archDatabase.savedPlans["full-collection"].nodes = ghDatabase.map(item => item.number);
+    }
+    if (!archDatabase.activePlanId || !archDatabase.savedPlans[archDatabase.activePlanId]) {
+      archDatabase.activePlanId = "full-collection";
+    }
+  }
+
+  function populatePlanSwitcher() {
+    const select = document.getElementById("select-active-plan");
+    if (!select) return;
+    select.innerHTML = "";
+    Object.keys(archDatabase.savedPlans).forEach(pid => {
+      const p = archDatabase.savedPlans[pid];
+      select.innerHTML += `<option value="${pid}" ${pid === archDatabase.activePlanId ? 'selected' : ''}>${p.name}</option>`;
+    });
+  }
+
+  async function switchActivePlan(planId) {
+    archDatabase.activePlanId = planId;
+    localStorage.setItem("wiki-architecture-state", JSON.stringify(archDatabase));
+    if (window.wikiDirHandle) {
+      await window.writeWikiFile("wiki-architecture.json", archDatabase);
+    }
+    renderBoard();
+  }
+
+  // Compile active plan cards by overlaying database custom columns
+  function compileBoardCards() {
+    const activePlan = archDatabase.savedPlans[archDatabase.activePlanId] || { name: "Full Collection Roadmap", nodes: [], metadata: {} };
+    const nodesInPlan = activePlan.nodes || [];
+    const metadataMap = activePlan.metadata || {};
+
+    boardCards = ghDatabase
+      .filter(item => nodesInPlan.includes(item.number))
+      .map(item => {
+        const overlay = metadataMap[item.number] || {};
+        
+        // Auto-derive size estimate (S/M/L) based on description or size
+        let defaultEst = "S";
+        const descText = `${item.title} ${item.body || ""}`.toLowerCase();
+        if (descText.includes("implement") || descText.includes("support") || descText.includes("rewrite")) {
+          defaultEst = "M";
+        }
+        if (descText.includes("vectored") || descText.includes("spec v3") || descText.includes("compaction")) {
+          defaultEst = "L";
+        }
+        const est = overlay.est || defaultEst;
+
+        // Auto-derive layer
+        let defaultLayer = "Catalog Operations";
+        if (descText.includes("planning") || descText.includes("scan") || descText.includes("projection")) {
+          defaultLayer = "Planning & Scans";
+        } else if (descText.includes("delete") || descText.includes("row-level") || descText.includes("mor") || descText.includes("cow")) {
+          defaultLayer = "Row-Level Ops";
+        } else if (descText.includes("transaction") || descText.includes("isolation") || descText.includes("commit")) {
+          defaultLayer = "Transactions";
+        } else if (descText.includes("compaction") || descText.includes("rewrite") || descText.includes("expire") || descText.includes("gc")) {
+          defaultLayer = "Maintenance & GC";
+        }
+        const layer = overlay.layer || defaultLayer;
+
+        // Auto-derive triageColumn
+        let defaultCol = "later";
+        if (item.state === "merged" || item.state === "closed") {
+          defaultCol = "cut";
+        } else if (item.state === "open" && (overlay.status === "in-progress" || (item.body || "").includes("- [x]"))) {
+          defaultCol = "now";
+        } else if (overlay.status === "planned" || item.state === "open") {
+          defaultCol = "next";
+        }
+        const col = overlay.triageColumn || defaultCol;
+
+        return {
+          id: item.number,
+          title: item.title,
+          type: item.type || "issue",
+          state: item.state || "open",
+          binding: item.binding || "core",
+          author: item.author || "iceberg-dev",
+          url: item.url || "#",
+          layer: layer,
+          est: est,
+          col: col
+        };
+      });
+  }
+
+  function renderBoard() {
+    compileBoardCards();
+
+    const searchVal = document.getElementById("triage-search").value.toLowerCase().trim();
+    const bindingFilter = document.getElementById("filter-binding").value;
+    const layerFilter = document.getElementById("filter-layer").value;
+
+    const board = document.getElementById("triage-board-element");
+    board.innerHTML = "";
+
+    // 1. Build columns
+    const colBodies = {};
+    const colCounts = {};
+    const colFoots = {};
+
+    COLUMNS.forEach(c => {
+      const colSection = document.createElement("section");
+      colSection.className = "col";
+      colSection.dataset.col = c.key;
+
+      const head = document.createElement("div");
+      head.className = "col-head";
+      head.innerHTML = `
+        <h2>${c.label}</h2>
+        <span class="count" id="count-${c.key}">0</span>
+      `;
+
+      const body = document.createElement("div");
+      body.className = "col-body";
+      body.id = `body-${c.key}`;
+
+      const foot = document.createElement("div");
+      foot.className = "col-foot";
+      foot.id = `foot-${c.key}`;
+
+      colSection.appendChild(head);
+      colSection.appendChild(body);
+      colSection.appendChild(foot);
+      board.appendChild(colSection);
+
+      colBodies[c.key] = body;
+      colCounts[c.key] = head.querySelector(".count");
+      colFoots[c.key] = foot;
+
+      // Drop Targets Handlers
+      colSection.addEventListener("dragover", e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        colSection.classList.add("dragover");
+      });
+      colSection.addEventListener("dragleave", e => {
+        if (!colSection.contains(e.relatedTarget)) {
+          colSection.classList.remove("dragover");
+        }
+      });
+      colSection.addEventListener("drop", async e => {
+        e.preventDefault();
+        colSection.classList.remove("dragover");
+        if (!draggedCardId) return;
+
+        const activePlanId = archDatabase.activePlanId;
+        const plan = archDatabase.savedPlans[activePlanId];
+        if (plan) {
+          if (!plan.metadata) plan.metadata = {};
+          if (!plan.metadata[draggedCardId]) {
+            plan.metadata[draggedCardId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+          }
+          plan.metadata[draggedCardId].triageColumn = c.key;
+
+          // Sync status along with column placement
+          if (c.key === "now") plan.metadata[draggedCardId].status = "in-progress";
+          if (c.key === "cut") plan.metadata[draggedCardId].status = "complete";
+          if (c.key === "next") plan.metadata[draggedCardId].status = "planned";
+
+          localStorage.setItem("wiki-architecture-state", JSON.stringify(archDatabase));
+          if (window.wikiDirHandle) {
+            await window.writeWikiFile("wiki-architecture.json", archDatabase);
+          }
+          renderBoard();
+        }
+      });
+    });
+
+    // 2. Filter & render cards
+    let filtered = boardCards;
+    if (searchVal) {
+      filtered = filtered.filter(t => t.id.includes(searchVal) || t.title.toLowerCase().includes(searchVal));
+    }
+    if (bindingFilter !== "all") {
+      filtered = filtered.filter(t => t.binding === bindingFilter);
+    }
+    if (layerFilter !== "all") {
+      filtered = filtered.filter(t => t.layer === layerFilter);
+    }
+    if (activeFilterTag) {
+      filtered = filtered.filter(t => t.type === activeFilterTag);
+    }
+
+    const counts = { now: 0, next: 0, later: 0, cut: 0 };
+    const pts = { now: 0, next: 0, later: 0, cut: 0 };
+
+    filtered.forEach(t => {
+      const card = makeTicketCard(t);
+      if (colBodies[t.col]) {
+        colBodies[t.col].appendChild(card);
+        counts[t.col]++;
+        pts[t.col] += ESTIMATE_SCORING[t.est] || 1;
+      }
+    });
+
+    // Update tallies
+    COLUMNS.forEach(c => {
+      colCounts[c.key].textContent = counts[c.key];
+      colFoots[c.key].innerHTML = `estimate <b>${pts[c.key]} pt${pts[c.key] === 1 ? '' : 's'}</b>`;
+    });
+
+    // Update Filter Indicator Badges
+    const badgeContainer = document.getElementById("filter-badge-container");
+    const badgePill = document.getElementById("filter-active-pill");
+    if (activeFilterTag) {
+      badgePill.textContent = `Filter Type: ${activeFilterTag.toUpperCase()} ×`;
+      badgeContainer.style.display = "flex";
+    } else {
+      badgeContainer.style.display = "none";
+    }
+  }
+
+  function makeTicketCard(t) {
+    const card = document.createElement("article");
+    card.className = "ticket";
+    card.draggable = true;
+
+    // Stable color hues for language binding pills
+    let hash = 0;
+    for (let i = 0; i < t.binding.length; i++) {
+      hash = t.binding.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const hue = Math.abs(hash % 360);
+
+    card.innerHTML = `
+      <div class="ticket-top">
+        <span class="tid">#${t.id}</span>
+        <button type="button" class="tag tag-${t.type}">${t.type}</button>
+        <span style="font-size: 8.5px; font-weight: bold; background: hsla(${hue}, 60%, 40%, 0.15); color: hsla(${hue}, 70%, 30%, 1); border: 1px solid hsla(${hue}, 60%, 40%, 0.25); padding: 1px 6px; border-radius: 4px; font-family: var(--mono); text-transform: uppercase;">
+          ${t.binding}
+        </span>
+        <span class="est-pill">${t.est}</span>
+      </div>
+      <div class="ttitle">${t.title}</div>
+      <div class="ticket-bot">
+        <span class="gh-state-dot gh-state-${t.state}" title="State: ${t.state}"></span>
+        <span class="owner">${t.author}</span>
+        <span style="font-size: 9px; font-family: var(--mono); color: var(--g500); text-transform: uppercase; font-weight: bold;">
+          ${t.layer}
+        </span>
+      </div>
+    `;
+
+    // Filter by tag type on click
+    card.querySelector(`.tag-${t.type}`).onclick = (e) => {
+      e.stopPropagation();
+      activeFilterTag = activeFilterTag === t.type ? null : t.type;
+      renderBoard();
+    };
+
+    // Drag events
+    card.addEventListener("dragstart", e => {
+      draggedCardId = t.id;
+      card.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", t.id);
+    });
+
+    card.addEventListener("dragend", () => {
+      draggedCardId = null;
+      card.classList.remove("dragging");
+      document.querySelectorAll(".col.dragover").forEach(el => el.classList.remove("dragover"));
+    });
+
+    return card;
+  }
+
+  function clearActiveTagFilter() {
+    activeFilterTag = null;
+    renderBoard();
+  }
+
+  async function resetTriagePlacements() {
+    if (confirm("Reset all issue and PR columns back to their automatic best guess?")) {
+      const activePlanId = archDatabase.activePlanId;
+      const plan = archDatabase.savedPlans[activePlanId];
+      if (plan && plan.metadata) {
+        Object.keys(plan.metadata).forEach(nid => {
+          delete plan.metadata[nid].triageColumn;
+        });
+        localStorage.setItem("wiki-architecture-state", JSON.stringify(archDatabase));
+        if (window.wikiDirHandle) {
+          await window.writeWikiFile("wiki-architecture.json", archDatabase);
+        }
+        renderBoard();
+      }
+    }
+  }
+
+  // Compile full shareable markdown table output and copy it
+  function copyBoardMarkdown() {
+    const activePlanId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activePlanId] || { name: "Active Contribution" };
+    
+    let mdLines = [];
+    mdLines.push(`# Iceberg Triage & Contribution Board: ${plan.name}`);
+    mdLines.push(`*Dynamically compiled on ${new Date().toLocaleDateString()}*`);
+    mdLines.push("");
+    mdLines.push("This board triage outlines prioritized cycle lanes, language targets, and estimated effort mappings.");
+    mdLines.push("");
+
+    COLUMNS.forEach(c => {
+      const colCards = boardCards.filter(t => t.col === c.key);
+      const totalEst = colCards.reduce((acc, t) => acc + (ESTIMATE_SCORING[t.est] || 1), 0);
+      
+      mdLines.push(`## 📌 ${c.label} (${colCards.length} Cards · ${totalEst} story points)`);
+      mdLines.push(`_${c.rationale}_`);
+      mdLines.push("");
+      
+      if (colCards.length === 0) {
+        mdLines.push("*No tickets triaged inside this lane.*");
+      } else {
+        colCards.forEach(t => {
+          const stateIcon = t.state === "merged" ? "🟣" : (t.state === "closed" ? "🔴" : "🟢");
+          mdLines.push(`*   **#${t.id}** ${stateIcon} \`[${t.type.toUpperCase()}]\` \`[${t.binding.toUpperCase()}]\` - ${t.title} (Effort: **${t.est}** | Subsystem: _${t.layer}_ | Owner: _@${t.author}_)`);
+        });
+      }
+      mdLines.push("");
+    });
+
+    const fullMarkdown = mdLines.join("\n");
+    const copyBtn = document.getElementById("btn-copy-markdown");
+
+    navigator.clipboard.writeText(fullMarkdown).then(() => {
+      copyBtn.textContent = "Copied ✓";
+      copyBtn.classList.add("copied");
+      setTimeout(() => {
+        copyBtn.textContent = "📋 Copy as markdown";
+        copyBtn.classList.remove("copied");
+      }, 1500);
+    }).catch(err => {
+      // Fallback
+      const ta = document.getElementById("hidden-markdown-textarea");
+      ta.value = fullMarkdown;
+      ta.style.display = "block";
+      ta.select();
+      try {
+        document.execCommand("copy");
+        copyBtn.textContent = "Copied ✓";
+      } catch (e) {
+        alert("Please select and copy the text area content manually.");
+      }
+      ta.style.display = "none";
+    });
+  }
+</script>
+</body>
+</html>
