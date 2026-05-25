@@ -223,6 +223,9 @@
           <button class="btn" id="btn-delete-plan" style="padding: 0 10px; height: 32px; font-size: 11.5px; background: transparent; border-color: var(--clay); color: var(--clay);" onclick="deleteActivePlan()">
             🗑️ Delete Plan
           </button>
+          <button class="btn" style="padding: 0 10px; height: 32px; font-size: 11.5px; background: transparent; border-color: var(--clay); color: var(--clay);" onclick="togglePlanSpecEditor()" title="Configure Roadmap-level RFC, Design document links, and gotchas">
+            📄 Roadmap Design Doc
+          </button>
         </div>
 
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" id="node-adder-container">
@@ -243,6 +246,43 @@
           <button class="btn btn-clay" style="padding: 0 12px; height: 32px; font-size: 11.5px;" onclick="addNodeToActivePlan()">
             Add to DAG
           </button>
+        </div>
+      </div>
+
+      <!-- Row 1.5: Plan-level Google Doc Design Specs Editor -->
+      <div id="plan-spec-editor-card" class="arch-task-card" style="display: none; background: var(--ivory); border: 1.5px dashed var(--clay); border-radius: 8px; padding: 16px; margin-top: 4px; margin-bottom: 4px; flex-direction: column; gap: 10px; transition: all 0.2s ease;">
+        <div style="font-size: 11px; font-weight: bold; color: var(--clay); font-family: var(--sans); letter-spacing: 0.05em; text-transform: uppercase; display: flex; justify-content: space-between; align-items: center;">
+          <span>🛠️ Roadmap-Level RFC &amp; Design Document Settings</span>
+          <button class="arch-task-delete" style="font-size: 14px;" onclick="togglePlanSpecEditor()">×</button>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 120px; gap: 12px; align-items: center; width: 100%;">
+          <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+            <input type="url" id="plan-doc-url" class="matrix-search-input" style="height: 32px; flex: 1; font-size: 12px; margin: 0;" placeholder="Paste Google Doc URL for this entire Roadmap..." onchange="savePlanDocUrl(this.value)">
+            <a id="plan-doc-link-btn" href="#" target="_blank" class="btn btn-clay" style="height: 32px; padding: 0 10px; font-size: 11px; line-height: 28px; display: none; align-items: center; text-decoration: none;" title="Open Google Doc in a new tab">
+              Open ↗
+            </a>
+          </div>
+          <div>
+            <select id="plan-doc-status" class="matrix-filter-select" style="height: 32px; font-size: 11.5px; font-weight: bold; width: 100%; border-color: var(--clay); color: var(--clay);" onchange="savePlanDocStatus(this.value)">
+              <option value="">Status: None</option>
+              <option value="drafting">📝 Drafting</option>
+              <option value="in-review">👀 In Review</option>
+              <option value="approved">🟢 Approved</option>
+            </select>
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; width: 100%;">
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 11.5px; font-weight: bold; color: var(--g600);">High-Level TL;DR Spec Summary:</label>
+            <textarea id="plan-doc-tldr" class="matrix-search-input" style="height: 80px; font-size: 12.5px; font-family: var(--serif); resize: vertical; padding: 8px; line-height: 1.45; margin: 0;" placeholder="Describe key design objectives, overall target scope, and technical roadmap outlines..." onchange="savePlanDocTldr(this.value)"></textarea>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <label style="font-size: 11.5px; font-weight: bold; color: var(--g600);">Proposed Roadmap API / Gotchas (One per line):</label>
+            <textarea id="plan-doc-notes" class="matrix-search-input" style="height: 80px; font-size: 12.5px; font-family: var(--sans); resize: vertical; padding: 8px; line-height: 1.45; margin: 0;" placeholder="List key gotchas, spec evolution constraints, or backward compatibility notes..." onchange="savePlanDocNotes(this.value)"></textarea>
+          </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button class="btn btn-clay" style="font-size: 11px; padding: 2px 12px; height: 28px;" onclick="togglePlanSpecEditor()">Close Editor</button>
         </div>
       </div>
 
@@ -1003,37 +1043,6 @@
         </div>
       </div>
 
-      <!-- Section: Design Document & RFC Link -->
-      <div style="margin-top: 18px; border-top: 1.5px solid var(--g200); padding-top: 14px;">
-        <div class="nav-category" style="border-bottom: none; margin-bottom: 6px; font-size: 11px; font-weight: bold; letter-spacing: 0.05em; color: var(--clay);">
-          📄 Design Document &amp; RFC Link
-        </div>
-        <div class="arch-task-card" style="background: var(--paper); display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;">
-          <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
-            <input type="url" class="matrix-search-input" style="height: 32px; flex: 1; font-size: 12px;" placeholder="Paste Google Doc URL here..." value="${active.docUrl || ''}" onchange="saveNodeDocUrl('${active.id}', this.value)">
-            ${active.docUrl ? `
-              <a href="${active.docUrl}" target="_blank" class="btn btn-clay" style="height: 32px; padding: 0 10px; font-size: 11px; line-height: 28px; display: inline-flex; align-items: center; text-decoration: none;" title="Open Google Doc in a new tab">
-                Open ↗
-              </a>
-            ` : ''}
-          </div>
-          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
-            <span style="font-size: 11.5px; font-weight: bold; color: var(--g600);">Doc Status:</span>
-            <select class="matrix-filter-select" style="height: 28px; font-size: 11px; font-weight: bold; width: 120px; border-color: var(--clay); color: var(--clay);" onchange="saveNodeDocStatus('${active.id}', this.value)">
-              <option value="" ${!active.docStatus ? 'selected' : ''}>None</option>
-              <option value="drafting" ${active.docStatus === 'drafting' ? 'selected' : ''}>📝 Drafting</option>
-              <option value="in-review" ${active.docStatus === 'in-review' ? 'selected' : ''}>👀 In Review</option>
-              <option value="approved" ${active.docStatus === 'approved' ? 'selected' : ''}>🟢 Approved</option>
-              <option value="retired" ${active.docStatus === 'retired' ? 'selected' : ''}>⚠️ Retired</option>
-            </select>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 4px;">
-            <span style="font-size: 11.5px; font-weight: bold; color: var(--g600);">TL;DR Design Summary:</span>
-            <textarea class="matrix-search-input" style="height: 60px; font-size: 12px; font-family: var(--serif); resize: vertical; padding: 6px; line-height: 1.4;" placeholder="Describe key design objectives or summary of this proposal..." onchange="saveNodeDocTldr('${active.id}', this.value)">${active.docTldr || ''}</textarea>
-          </div>
-        </div>
-      </div>
-
       <!-- Directed Dependency Flow Lane -->
       <div style="margin-top: 18px; border-top: 1.5px solid var(--g200); padding-top: 14px;">
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
@@ -1111,46 +1120,6 @@
     }
   }
 
-  async function saveNodeDocUrl(nodeId, url) {
-    const activeId = archDatabase.activePlanId;
-    const plan = archDatabase.savedPlans[activeId];
-    if (plan) {
-      if (!plan.metadata) plan.metadata = {};
-      if (!plan.metadata[nodeId]) {
-        plan.metadata[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
-      }
-      plan.metadata[nodeId].docUrl = url;
-      await savePlannerOverlay();
-      renderDetailPanel();
-    }
-  }
-
-  async function saveNodeDocStatus(nodeId, status) {
-    const activeId = archDatabase.activePlanId;
-    const plan = archDatabase.savedPlans[activeId];
-    if (plan) {
-      if (!plan.metadata) plan.metadata = {};
-      if (!plan.metadata[nodeId]) {
-        plan.metadata[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
-      }
-      plan.metadata[nodeId].docStatus = status;
-      await savePlannerOverlay();
-      renderDetailPanel();
-    }
-  }
-
-  async function saveNodeDocTldr(nodeId, tldr) {
-    const activeId = archDatabase.activePlanId;
-    const plan = archDatabase.savedPlans[activeId];
-    if (plan) {
-      if (!plan.metadata) plan.metadata = {};
-      if (!plan.metadata[nodeId]) {
-        plan.metadata[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
-      }
-      plan.metadata[nodeId].docTldr = tldr;
-      await savePlannerOverlay();
-    }
-  }
 
   // 4. Checklist Actions
   async function toggleTaskCompletion(nodeId, taskId) {
@@ -2276,6 +2245,26 @@ ${detailsList}
       });
     }
 
+    // Load plan-level Google Doc fields into inputs
+    const planDocUrl = document.getElementById("plan-doc-url");
+    const planDocStatus = document.getElementById("plan-doc-status");
+    const planDocTldr = document.getElementById("plan-doc-tldr");
+    const planDocNotes = document.getElementById("plan-doc-notes");
+    const linkBtn = document.getElementById("plan-doc-link-btn");
+
+    if (planDocUrl) planDocUrl.value = plan.docUrl || "";
+    if (planDocStatus) planDocStatus.value = plan.docStatus || "";
+    if (planDocTldr) planDocTldr.value = plan.docTldr || "";
+    if (planDocNotes) planDocNotes.value = (plan.docNotes || []).join("\n");
+    if (linkBtn) {
+      if (plan.docUrl) {
+        linkBtn.href = plan.docUrl;
+        linkBtn.style.display = "inline-flex";
+      } else {
+        linkBtn.style.display = "none";
+      }
+    }
+
     // Toggle Node Adder panel visibility
     const adderContainer = document.getElementById("node-adder-container");
     const nodeSelect = document.getElementById("add-node-select");
@@ -2326,6 +2315,52 @@ ${detailsList}
           });
         }
       }
+    }
+  }
+
+  function togglePlanSpecEditor() {
+    const card = document.getElementById("plan-spec-editor-card");
+    if (card) {
+      const isShowing = card.style.display === "flex";
+      card.style.display = isShowing ? "none" : "flex";
+    }
+  }
+
+  async function savePlanDocUrl(url) {
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan) {
+      plan.docUrl = url.trim();
+      await savePlannerOverlay();
+      updatePlanToolbarControls();
+    }
+  }
+
+  async function savePlanDocStatus(status) {
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan) {
+      plan.docStatus = status;
+      await savePlannerOverlay();
+    }
+  }
+
+  async function savePlanDocTldr(tldr) {
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan) {
+      plan.docTldr = tldr.trim();
+      await savePlannerOverlay();
+    }
+  }
+
+  async function savePlanDocNotes(notesText) {
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan) {
+      const raw = notesText.split("\n");
+      plan.docNotes = raw.map(n => n.trim()).filter(n => n.length > 0);
+      await savePlannerOverlay();
     }
   }
 </script>

@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Design Documents &amp; RFC Hub — The Iceberg Cookbook</title>
+<title>Roadmap Design Documents &amp; RFC Hub — The Iceberg Cookbook</title>
 <link rel="stylesheet" href="wiki.css">
 <script src="wiki.js" defer></script>
 <style>
@@ -39,7 +39,7 @@
   /* Split layout */
   .doc-hub-layout {
     display: grid;
-    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-columns: 260px minmax(0, 1fr);
     gap: 40px;
     margin-top: 24px;
   }
@@ -47,7 +47,7 @@
     .doc-hub-layout { grid-template-columns: 1fr; }
   }
 
-  /* Sticky Navigation of documents */
+  /* Sticky Navigation of roadmaps */
   .doc-nav-card {
     position: sticky;
     top: 24px;
@@ -76,7 +76,7 @@
     font-size: 13px;
     color: var(--g700);
     text-decoration: none;
-    padding: 6px 10px;
+    padding: 8px 12px;
     border-radius: 6px;
     border-left: 2.5px solid transparent;
     transition: all 0.15s ease;
@@ -84,6 +84,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     display: block;
+    font-weight: 500;
   }
   .doc-nav-item:hover {
     background: var(--g100);
@@ -196,8 +197,8 @@
   .status-line {
     position: absolute;
     top: 11px;
-    left: 10%;
-    right: 10%;
+    left: 12.5%;
+    right: 12.5%;
     height: 3px;
     background: var(--g200);
     z-index: 0;
@@ -290,6 +291,74 @@
     padding: 20px;
     margin-top: 24px;
   }
+
+  /* Risks table styling inside subpanel */
+  .risks-tab-table {
+    width: 100%;
+    border: 1.5px solid var(--g300);
+    border-radius: 8px;
+    overflow: hidden;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .risks-tab-table th {
+    background: var(--g100);
+    text-transform: uppercase;
+    font-family: var(--sans);
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    font-weight: bold;
+    color: var(--slate);
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1.5px solid var(--g300);
+  }
+  .risks-tab-table td {
+    padding: 10px 14px;
+    line-height: 1.45;
+    border-bottom: 1px solid var(--g300);
+    vertical-align: top;
+  }
+  .risks-tab-table tr:last-child td {
+    border-bottom: none;
+  }
+  .sev-badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: bold;
+    text-align: center;
+  }
+  .sev-HIGH { background: #F3D9CC; color: #8A3B1E; }
+  .sev-MED  { background: var(--oat); color: var(--slate); }
+  .sev-LOW  { background: #E4E9DC; color: #4B5C39; }
+
+  /* Milestone list inside card */
+  .m-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .m-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1.5px solid var(--g200);
+    background: var(--ivory);
+  }
+  .m-item .m-title {
+    font-weight: 500;
+    color: var(--slate);
+    flex: 1;
+    margin-left: 10px;
+    overflow: hidden;
+    text-white-space: nowrap;
+    text-overflow: ellipsis;
+  }
 </style>
 </head>
 <body>
@@ -305,20 +374,15 @@
       <div class="eyebrow" style="display: flex; justify-content: space-between; align-items: center;">
         <span>RFC Registry &amp; Learning Hub · Iceberg Cookbook</span>
         <button class="btn btn-clay" id="btn-toggle-editor" style="font-size: 11px; padding: 2px 10px; height: 26px;" onclick="toggleDocEditorPanel()">
-          ✏️ Edit Design Document metadata
+          ✏️ Edit Roadmap design document metadata
         </button>
       </div>
-      <h1 id="hub-title-display">Design Documents &amp; RFC Hub</h1>
+      <h1 id="hub-title-display">Roadmap Design Documents &amp; RFC Hub</h1>
       
       <div style="display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap;">
-        <span style="font-size: 11px; font-weight: 800; color: var(--slate); font-family: var(--sans); letter-spacing: 0.05em;">ACTIVE ROADMAP:</span>
-        <select id="select-active-plan" class="matrix-filter-select" style="border-color: var(--clay); color: var(--clay); font-weight: 600; min-width: 180px; height: 32px;" onchange="switchActivePlan(this.value)">
-          <!-- Dynamically populated -->
-        </select>
-        
-        <span style="font-size: 11px; font-weight: 800; color: var(--slate); font-family: var(--sans); letter-spacing: 0.05em; margin-left: 12px;">DOC STATUS:</span>
+        <span style="font-size: 11px; font-weight: 800; color: var(--slate); font-family: var(--sans); letter-spacing: 0.05em;">DOC STATUS:</span>
         <select id="filter-doc-status" class="matrix-filter-select" style="height: 32px;" onchange="renderDocHub()">
-          <option value="ALL">All Writeups</option>
+          <option value="ALL">All Saved Roadmaps</option>
           <option value="drafting">📝 Drafting</option>
           <option value="in-review">👀 In Review</option>
           <option value="approved">🟢 Approved</option>
@@ -327,8 +391,8 @@
       </div>
 
       <div class="prompt-box">
-        <span class="label">RFC &amp; Deep-Dive Writeups</span>
-        This dynamic hub serves as the centralized directory for all Iceberg technical explainers, design documents, and Google Doc proposals. Items edit and synchronize live with your visual architecture planner maps.
+        <span class="label">Roadmap-Level RFC &amp; Writeups</span>
+        This dynamic hub serves as the centralized directory for all Iceberg technical design explainers, design documents, and Google Doc proposals linked directly to the high-level roadmap level.
       </div>
     </header>
 
@@ -338,7 +402,7 @@
       <!-- Left side: sticky nav table of contents -->
       <div class="doc-nav-col">
         <div class="doc-nav-card">
-          <div class="nav-title">Documents Directory</div>
+          <div class="nav-title">Roadmaps Directory</div>
           <div class="doc-nav-list" id="doc-nav-element">
             <!-- Dynamically populated -->
           </div>
@@ -351,11 +415,11 @@
         <!-- Interactive metadata editor (Hidden by default) -->
         <div class="wiki-editor-card" id="doc-metadata-editor-element" style="display: none; margin-bottom: 32px;">
           <div style="font-size: 11px; font-weight: bold; color: var(--clay); font-family: var(--sans); margin-bottom: 12px; letter-spacing: 0.05em; text-transform: uppercase;">
-            🛠️ Design Document Wiki Editor
+            🛠️ Roadmap Design Document Wiki Editor
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px;">
             <div>
-              <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">Choose Component Node:</label>
+              <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">Choose Target Roadmap Plan:</label>
               <select id="editor-select-node" class="matrix-filter-select" style="width: 100%; border-color: var(--clay); height: 32px;" onchange="populateEditorNodeFields(this.value)">
                 <!-- Dynamically populated -->
               </select>
@@ -366,7 +430,7 @@
                 <option value="">None / Not Registered</option>
                 <option value="drafting">📝 Drafting</option>
                 <option value="in-review">👀 In Review</option>
-                <option value="approved">🟢 Approved (Ready to Code)</option>
+                <option value="approved">🟢 Approved</option>
               </select>
             </div>
           </div>
@@ -377,18 +441,18 @@
           </div>
           
           <div style="margin-bottom: 12px;">
-            <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">TL;DR Design Summary (HTML/Markdown):</label>
-            <textarea id="editor-doc-tldr" class="matrix-search-input" style="height: 64px; font-family: var(--serif); resize: vertical; padding: 8px; line-height: 1.45;" placeholder="Provide a brief TL;DR summary explaining what this architectural proposal solves..."></textarea>
+            <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">High-Level TL;DR Roadmap Summary:</label>
+            <textarea id="editor-doc-tldr" class="matrix-search-input" style="height: 64px; font-family: var(--serif); resize: vertical; padding: 8px; line-height: 1.45;" placeholder="Provide a brief high-level TL;DR summary explaining what this architectural roadmap solves..."></textarea>
           </div>
 
           <div style="margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
             <div>
-              <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">Key Design Notes / Gotchas (One per line):</label>
-              <textarea id="editor-doc-notes" class="matrix-search-input" style="height: 60px; font-family: var(--sans); font-size: 12.5px; resize: vertical; padding: 6px;" placeholder="List key gotchas or implementation details..."></textarea>
+              <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">Gotchas &amp; Learning Constraints (One per line):</label>
+              <textarea id="editor-doc-notes" class="matrix-search-input" style="height: 60px; font-family: var(--sans); font-size: 12.5px; resize: vertical; padding: 6px;" placeholder="List key gotchas or implementation constraints..."></textarea>
             </div>
             <div>
-              <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">Proposed Code/API Snippet (Codeblock):</label>
-              <textarea id="editor-doc-snippet" class="matrix-search-input" style="height: 60px; font-family: var(--mono); font-size: 11px; resize: vertical; padding: 6px;" placeholder="// code snippet stubs..."></textarea>
+              <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">Proposed Struct API Snippet (Codeblock):</label>
+              <textarea id="editor-doc-snippet" class="matrix-search-input" style="height: 60px; font-family: var(--mono); font-size: 11px; resize: vertical; padding: 6px;" placeholder="// Proposed spec or config properties..."></textarea>
             </div>
           </div>
 
@@ -414,14 +478,31 @@
   // ── State Databases ──
   let ghDatabase = [];      // Loaded collection
   let archDatabase = {};    // Loaded overlays
-  let planNodes = [];       // Active nodes list
+  let planNodesMap = {};    // Nodes lists by plan
+  let selectedPlanId = null; // Active selected plan to view
 
-  const STATUS_LABELS = {
-    "drafting": "Drafting",
-    "in-review": "In Review",
-    "approved": "Approved",
-    "complete": "Merged"
-  };
+  const ESTIMATE_SCORING = { S: 1, M: 2, L: 4 };
+
+  const DEFAULT_RISKS = [
+    {
+      risk: "<strong>TableMetadata Concurrency:</strong> Parallel commits conflict during rest metastore swaps.",
+      sev: "HIGH",
+      mitigation: "Utilize optimistic retry policies and enforce transaction stubs with clean snapshot-isolation rollback boundaries."
+    },
+    {
+      risk: "<strong>Serialization Breakages:</strong> Introducing properties or spec version gating breaks minor engine API schemas.",
+      sev: "MED",
+      mitigation: "Enforce custom kebab-case parsers without using Jackson annotations; register revapi track gates."
+    }
+  ];
+
+  const DEFAULT_QUESTIONS = [
+    {
+      question: "Do we allow editing deletes, or only soft deletes?",
+      details: "Soft deletes are simpler to persist in V2 format lists, whereas complete rewrites during compaction require sequence number gating.",
+      owner: "Decide with · Community Consensus"
+    }
+  ];
 
   document.addEventListener("DOMContentLoaded", async () => {
     window.addEventListener("wiki-sync-status-changed", async () => {
@@ -456,10 +537,7 @@
     // 3. Align Databases
     alignDatabases();
 
-    // 4. Populate plan switcher
-    populatePlanSwitcher();
-
-    // 5. Render
+    // 4. Render
     renderDocHub();
   }
 
@@ -467,39 +545,14 @@
     if (!archDatabase || typeof archDatabase !== "object" || Array.isArray(archDatabase) || !archDatabase.savedPlans) {
       archDatabase = { savedPlans: {}, activePlanId: "" };
     }
-    if (!archDatabase.activePlanId || !archDatabase.savedPlans[archDatabase.activePlanId]) {
-      const keys = Object.keys(archDatabase.savedPlans);
-      if (keys.length > 0) {
-        archDatabase.activePlanId = keys[0];
-      }
-    }
   }
 
-  function populatePlanSwitcher() {
-    const select = document.getElementById("select-active-plan");
-    if (!select) return;
-    select.innerHTML = "";
-    Object.keys(archDatabase.savedPlans).forEach(pid => {
-      const p = archDatabase.savedPlans[pid];
-      select.innerHTML += `<option value="${pid}" ${pid === archDatabase.activePlanId ? 'selected' : ''}>${p.name}</option>`;
-    });
-  }
-
-  async function switchActivePlan(planId) {
-    archDatabase.activePlanId = planId;
-    localStorage.setItem("wiki-architecture-state", JSON.stringify(archDatabase));
-    if (window.wikiDirHandle) {
-      await window.writeWikiFile("wiki-architecture.json", archDatabase);
-    }
-    renderDocHub();
-  }
-
-  function compilePlanNodes() {
-    const activePlan = archDatabase.savedPlans[archDatabase.activePlanId] || { name: "Full Collection Roadmap", nodes: [], metadata: {} };
+  function compilePlanNodes(planId) {
+    const activePlan = archDatabase.savedPlans[planId] || { name: "Full Collection Roadmap", nodes: [], metadata: {} };
     const nodesInPlan = activePlan.nodes || [];
     const metadataMap = activePlan.metadata || {};
 
-    planNodes = ghDatabase
+    return ghDatabase
       .filter(item => nodesInPlan.includes(item.number))
       .map(item => {
         const overlay = metadataMap[item.number] || {};
@@ -515,35 +568,40 @@
         const layer = overlay.layer || defaultLayer;
         const status = overlay.status || (item.state === "merged" || item.state === "closed" ? "complete" : "planned");
 
-        // Google Doc variables
-        const docUrl = overlay.docUrl || "";
-        const docStatus = overlay.docStatus || (docUrl ? "drafting" : "");
-        const docTldr = overlay.docTldr || "";
-        const docNotes = overlay.docNotes || [];
-        const docSnippet = overlay.docSnippet || "";
+        // Parse body checklist ratio
+        const lines = (item.body || "").split(/\r?\n/);
+        let checklistCount = 0;
+        let checklistCompleted = 0;
+        lines.forEach(l => {
+          const m = l.match(/^[\s\-\*]*\[([ xX])\]\s*(.+)$/);
+          if (m) {
+            checklistCount++;
+            if (m[1].toLowerCase() === 'x') checklistCompleted++;
+          }
+        });
+        
+        const customTasks = overlay.customTasks || [];
+        const taskStates = overlay.taskStates || {};
+        checklistCount += customTasks.length;
+        customTasks.forEach(t => {
+          let c = t.completed;
+          if (taskStates[t.id] !== undefined) c = taskStates[t.id];
+          if (c) checklistCompleted++;
+        });
 
         return {
           id: item.number,
           title: item.title,
-          type: item.type || "issue",
-          author: item.author || "iceberg-dev",
-          binding: item.binding || "core",
-          url: item.url,
           layer: layer,
           status: status,
-          dependsOn: (item.outgoing || []).filter(depId => nodesInPlan.includes(depId)),
-          docUrl: docUrl,
-          docStatus: docStatus,
-          docTldr: docTldr,
-          docNotes: docNotes,
-          docSnippet: docSnippet
+          binding: item.binding || "core",
+          checklistCount,
+          checklistCompleted
         };
       });
   }
 
   function renderDocHub() {
-    compilePlanNodes();
-    
     const navContainer = document.getElementById("doc-nav-element");
     const cardsContainer = document.getElementById("doc-cards-container");
     const statusFilter = document.getElementById("filter-doc-status").value;
@@ -551,65 +609,83 @@
     navContainer.innerHTML = "";
     cardsContainer.innerHTML = "";
 
-    // Filter plan nodes that have doc features or fit search criteria
-    const filteredNodes = planNodes.filter(node => {
+    const savedPlans = archDatabase.savedPlans || {};
+    const planKeys = Object.keys(savedPlans);
+
+    // Filter plan entries
+    const filteredPlans = planKeys.filter(pid => {
+      const plan = savedPlans[pid];
       if (statusFilter === "ALL") return true;
-      if (statusFilter === "LINKED") return node.docUrl !== "";
-      return node.docStatus === statusFilter;
+      if (statusFilter === "LINKED") return plan.docUrl && plan.docUrl !== "";
+      return plan.docStatus === statusFilter;
     });
 
-    // Populate dynamic metadata editor options
+    // Populate editor select options
     const editorSelect = document.getElementById("editor-select-node");
     if (editorSelect) {
-      editorSelect.innerHTML = planNodes.map(n => `<option value="${n.id}">#${n.id}: ${n.title.substring(0, 45)}...</option>`).join("");
+      editorSelect.innerHTML = planKeys.map(pid => `<option value="${pid}">${savedPlans[pid].name}</option>`).join("");
       populateEditorNodeFields(editorSelect.value);
     }
 
-    if (filteredNodes.length === 0) {
-      navContainer.innerHTML = `<span style="font-size: 11px; color: var(--g500); font-style: italic; padding: 6px 10px;">No writeups found</span>`;
+    if (filteredPlans.length === 0) {
+      navContainer.innerHTML = `<span style="font-size: 11px; color: var(--g500); font-style: italic; padding: 6px 10px;">No roadmaps found</span>`;
       cardsContainer.innerHTML = `
         <div class="doc-card" style="text-align: center; padding: 48px; color: var(--g500); font-style: italic;">
-          <h3>No Technical Explainers Match the Filter Criteria</h3>
-          <p style="margin-top: 10px; font-size: 13.5px;">Click the "Edit Design Document metadata" button in the upper-right corner to link Google Docs or draft writeup details directly on this page!</p>
+          <h3>No Roadmap Design Documents Match the Filter Criteria</h3>
+          <p style="margin-top: 10px; font-size: 13.5px;">Click the "Edit Roadmap design document metadata" button in the upper-right corner to link Google Docs or draft writeups for your active plans!</p>
         </div>
       `;
       return;
     }
 
-    filteredNodes.forEach((node, idx) => {
-      // Sidebar Navigation Menu Link
+    // Align selectedPlanId with the current filtered list
+    if (!selectedPlanId || !filteredPlans.includes(selectedPlanId)) {
+      if (filteredPlans.includes(archDatabase.activePlanId)) {
+        selectedPlanId = archDatabase.activePlanId;
+      } else {
+        selectedPlanId = filteredPlans[0];
+      }
+    }
+
+    // Populate Sidebar Navigation
+    filteredPlans.forEach(pid => {
+      const plan = savedPlans[pid];
+      const isActive = pid === selectedPlanId;
       navContainer.innerHTML += `
-        <a href="#doc-section-${node.id}" class="doc-nav-item" id="nav-link-${node.id}" onclick="highlightNav('${node.id}')">
-          <span style="font-family: var(--mono); font-weight: bold; color: var(--clay); font-size: 11px;">#${node.id}</span>
-          ${node.title}
+        <a href="javascript:void(0)" class="doc-nav-item ${isActive ? 'active' : ''}" id="nav-link-${pid}" onclick="selectPlan('${pid}')">
+          <span style="font-family: var(--mono); font-weight: bold; color: var(--clay); font-size: 11px; margin-right: 4px;">📁</span>
+          ${plan.name}
         </a>
       `;
+    });
 
-      // HSL color hash for language tag
-      let hash = 0;
-      for (let i = 0; i < node.binding.length; i++) {
-        hash = node.binding.charCodeAt(i) + ((hash << 5) - hash);
-      }
-      const hue = Math.abs(hash % 360);
+    // Render active plan card
+    const plan = savedPlans[selectedPlanId];
+    if (plan) {
+      const nodes = compilePlanNodes(selectedPlanId);
 
       // Determine progress bar percent based on doc/rfc review stages
       let progressPercent = 0;
       let step1 = "", step2 = "", step3 = "", step4 = "";
       
-      if (node.docStatus === "drafting") {
+      const docStatus = plan.docStatus || "";
+      const totalSlices = nodes.length;
+      const completedSlices = nodes.filter(n => n.status === "complete").length;
+
+      if (docStatus === "drafting") {
         progressPercent = 15;
         step1 = "active";
-      } else if (node.docStatus === "in-review") {
+      } else if (docStatus === "in-review") {
         progressPercent = 50;
         step1 = "complete";
         step2 = "active";
-      } else if (node.docStatus === "approved") {
+      } else if (docStatus === "approved") {
         progressPercent = 85;
         step1 = "complete";
         step2 = "complete";
         step3 = "active";
       }
-      if (node.status === "complete") {
+      if (completedSlices > 0 && completedSlices === totalSlices) {
         progressPercent = 100;
         step1 = "complete";
         step2 = "complete";
@@ -619,45 +695,92 @@
 
       // Compile design gotchas / notes list
       let gotchasHTML = "";
-      if (node.docNotes && node.docNotes.length > 0) {
-        gotchasHTML = node.docNotes.map(note => `<li style="margin-bottom: 6px; font-size: 13px;">${note}</li>`).join("");
+      const docNotes = plan.docNotes || [];
+      if (docNotes.length > 0) {
+        gotchasHTML = docNotes.map(note => `<li style="margin-bottom: 6px; font-size: 13px;">${note}</li>`).join("");
       } else {
         gotchasHTML = `
-          <li style="margin-bottom: 6px; font-size: 13px; color: var(--g500); font-style: italic;">No specific gotchas listed yet. Add architectural flags to prevent backward compatibility issues.</li>
+          <li style="margin-bottom: 6px; font-size: 13px; color: var(--g500); font-style: italic;">No specific gotchas listed yet. Add architectural flags to prevent backward compatibility issues during execution.</li>
+        `;
+      }
+
+      // Compile Risks
+      let risksHTML = "";
+      const risks = plan.risks && plan.risks.length > 0 ? plan.risks : DEFAULT_RISKS;
+      risks.forEach(r => {
+        risksHTML += `
+          <tr>
+            <td style="font-weight: bold; color: var(--slate);">${r.risk}</td>
+            <td><span class="sev-badge sev-${r.sev}">${r.sev}</span></td>
+            <td>${r.mitigation}</td>
+          </tr>
+        `;
+      });
+
+      // Compile Open Questions
+      let questionsHTML = "";
+      const questions = plan.openQuestions && plan.openQuestions.length > 0 ? plan.openQuestions : DEFAULT_QUESTIONS;
+      questions.forEach(q => {
+        questionsHTML += `
+          <div style="background: var(--ivory); border-left: 3px solid var(--clay); padding: 10px 14px; border-radius: 6px; margin-bottom: 8px;">
+            <div style="font-weight: bold; color: var(--slate); font-size: 13.5px; margin-bottom: 3px;">${q.question}</div>
+            <div style="font-size: 12.5px; color: var(--g600); line-height: 1.4;">${q.details}</div>
+            <div style="font-family: var(--mono); font-size: 10px; color: var(--g500); margin-top: 6px; font-weight: bold;">Owner: ${q.owner}</div>
+          </div>
+        `;
+      });
+
+      // Compile Milestones subpanel
+      let milestonesHTML = "";
+      if (nodes.length === 0) {
+        milestonesHTML = `<div style="font-size: 12.5px; color: var(--g500); font-style: italic; padding: 12px 0;">No milestones or component issues registered in this roadmap plan. Add nodes in the Architectural Planner!</div>`;
+      } else {
+        milestonesHTML = `
+          <div class="m-list">
+            ${nodes.map(n => `
+              <div class="m-item">
+                <span style="font-family: var(--mono); font-weight: bold; color: var(--clay); font-size: 12px;">#${n.id}</span>
+                <span class="m-title" title="${n.title}">${n.title}</span>
+                <span style="font-size: 10px; font-family: var(--mono); font-weight: bold; color: var(--g500); margin-right: 12px;">
+                  Tasks: ${n.checklistCompleted}/${n.checklistCount}
+                </span>
+                <span class="badge-status ${n.status}" style="font-size: 9px; padding: 2px 6px;">${n.status}</span>
+              </div>
+            `).join("")}
+          </div>
         `;
       }
 
       // Compile dynamic explainer card matching Acme 14-explainer structure
-      cardsContainer.innerHTML += `
-        <div class="doc-card" id="doc-section-${node.id}">
+      cardsContainer.innerHTML = `
+        <div class="doc-card" id="doc-section-${selectedPlanId}">
           <div class="doc-header">
             <div class="doc-title-sec">
-              <div class="eyebrow" style="margin-bottom: 2px;">RFC Proposal Summary · #${node.id}</div>
-              <h2>${node.title}</h2>
+              <div class="eyebrow" style="margin-bottom: 2px;">Roadmap RFC Specification · ${plan.name}</div>
+              <h2>${plan.name} Overview</h2>
               <div class="doc-meta">
-                Subsystem: <span style="background: hsla(${hue}, 60%, 40%, 0.1); border: 1px solid hsla(${hue}, 60%, 40%, 0.2); color: hsla(${hue}, 70%, 30%, 1); padding: 1.5px 5px; border-radius: 4px; font-size: 10px;">${node.binding.toUpperCase()}</span>
-                &nbsp;|&nbsp; Layer: <span>${node.layer}</span>
-                &nbsp;|&nbsp; Author: @${node.author}
+                Milestones: <span>${completedSlices} / ${totalSlices} Slices Complete</span>
+                &nbsp;|&nbsp; Effort Index: <span>${totalSlices} registered lanes</span>
               </div>
             </div>
             <div style="display: flex; gap: 8px;">
-              ${node.docUrl ? `
-                <a href="${node.docUrl}" target="_blank" class="btn btn-clay" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; height: 32px; padding: 0 12px; font-weight: bold;">
+              ${plan.docUrl ? `
+                <a href="${plan.docUrl}" target="_blank" class="btn btn-clay" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; height: 32px; padding: 0 12px; font-weight: bold;">
                   <span>📄 Open Google Doc Writeup</span> ↗
                 </a>
               ` : `
-                <button class="btn" style="border-color: var(--g300); font-size: 11px; height: 32px; padding: 0 10px; background: transparent; color: var(--g500);" onclick="openEditorForNode('${node.id}')">
+                <button class="btn" style="border-color: var(--g300); font-size: 11px; height: 32px; padding: 0 10px; background: transparent; color: var(--g500);" onclick="openEditorForNode('${selectedPlanId}')">
                   🔗 Link Google Doc
                 </button>
               `}
-              <button class="btn" style="border-color: var(--slate); font-size: 11px; height: 32px; padding: 0 10px; background: transparent;" onclick="copyRFCProposalMarkdown('${node.id}')" title="Copy clean Markdown proposal to clipboard">
-                📋 Copy RFC Proposal
+              <button class="btn" style="border-color: var(--slate); font-size: 11px; height: 32px; padding: 0 10px; background: transparent;" onclick="copyRFCProposalMarkdown('${selectedPlanId}')" title="Copy clean Markdown proposal to clipboard">
+                📋 Copy Roadmap RFC
               </button>
             </div>
           </div>
 
           <!-- Document Review Progression Tracks -->
-          <div style="font-size: 11.5px; font-weight: bold; color: var(--g600); margin-bottom: 6px; font-family: var(--sans); letter-spacing: 0.02em;">RFC PROGRESSION TRACK:</div>
+          <div style="font-size: 11.5px; font-weight: bold; color: var(--g600); margin-bottom: 6px; font-family: var(--sans); letter-spacing: 0.02em;">ROADMAP RFC STATE:</div>
           <div class="status-track">
             <div class="status-line"><div class="status-line-fill" style="width: ${progressPercent}%;"></div></div>
             <div class="status-step ${step1}">
@@ -680,64 +803,74 @@
 
           <!-- TLDR Explainer Section -->
           <div class="doc-tldr">
-            <b>TL;DR</b> — ${node.docTldr ? node.docTldr : `<em>No TL;DR summary provided yet. Linking a Google Doc or writing architectural summaries here establishes clear development tracks for other binding engines.</em>`}
+            <b>TL;DR spec summary</b> — ${plan.docTldr ? plan.docTldr : `<em>No high-level TL;DR design proposal written for this roadmap yet. Link a Google Doc or write overall spec outlines using the metadata editor at the top right to drive collaborative tracks!</em>`}
           </div>
 
-          <!-- Interactive Tabbed Subpanels (Details, Snippet, Prerequisites) -->
+          <!-- Interactive Tabbed Subpanels (Milestones, Gotchas, Snippet, Risks, Open Questions) -->
           <div class="tabs">
             <div class="tabbar">
-              <button class="active" onclick="switchSubPanelTab(this, 'pane-details-${node.id}')">Gotchas &amp; Learning</button>
-              <button onclick="switchSubPanelTab(this, 'pane-snippet-${node.id}')">Proposed API / Schema</button>
-              <button onclick="switchSubPanelTab(this, 'pane-dependencies-${node.id}')">Directed Prerequisites</button>
+              <button class="active" onclick="switchSubPanelTab(this, 'pane-milestones-${selectedPlanId}')">Milestones Checklist</button>
+              <button onclick="switchSubPanelTab(this, 'pane-gotchas-${selectedPlanId}')">Spec Gotchas</button>
+              <button onclick="switchSubPanelTab(this, 'pane-snippet-${selectedPlanId}')">Proposed API / Config</button>
+              <button onclick="switchSubPanelTab(this, 'pane-risks-${selectedPlanId}')">Risks Matrix</button>
+              <button onclick="switchSubPanelTab(this, 'pane-questions-${selectedPlanId}')">Open Questions</button>
             </div>
             
-            <!-- Tab 1: Gotchas -->
-            <div class="tab-pane active" id="pane-details-${node.id}">
-              <div style="font-weight: bold; color: var(--slate); font-size: 14px; margin-bottom: 10px;">Gotchas Worth Knowing:</div>
+            <!-- Tab 1: Milestones -->
+            <div class="tab-pane active" id="pane-milestones-${selectedPlanId}">
+              <div style="font-weight: bold; color: var(--slate); font-size: 14px; margin-bottom: 10px;">Registered Component Milestones:</div>
+              ${milestonesHTML}
+            </div>
+
+            <!-- Tab 2: Gotchas -->
+            <div class="tab-pane" id="pane-gotchas-${selectedPlanId}">
+              <div style="font-weight: bold; color: var(--slate); font-size: 14px; margin-bottom: 10px;">Roadmap Execution Gotchas:</div>
               <ul style="padding-left: 20px;">
                 ${gotchasHTML}
               </ul>
             </div>
 
-            <!-- Tab 2: Proposed API -->
-            <div class="tab-pane" id="pane-snippet-${node.id}">
-              <div style="font-weight: bold; color: var(--slate); font-size: 14px; margin-bottom: 6px;">API Struct Spec / Route Configuration:</div>
-              ${node.docSnippet ? `
-                <pre><code>${escapeHTML(node.docSnippet)}</code></pre>
+            <!-- Tab 3: API Snippet -->
+            <div class="tab-pane" id="pane-snippet-${selectedPlanId}">
+              <div style="font-weight: bold; color: var(--slate); font-size: 14px; margin-bottom: 6px;">Proposed Struct API Signatures:</div>
+              ${plan.docSnippet ? `
+                <pre><code>${escapeHTML(plan.docSnippet)}</code></pre>
               ` : `
-                <div style="font-size: 12.5px; color: var(--g500); font-style: italic; padding: 10px 0;">No API code snippets proposed yet. Click edit metadata above to paste code specifications!</div>
+                <div style="font-size: 12.5px; color: var(--g500); font-style: italic; padding: 10px 0;">No custom API code snippet proposed for this roadmap yet. Edit details to paste spec properties!</div>
               `}
             </div>
 
-            <!-- Tab 3: Prerequisites -->
-            <div class="tab-pane" id="pane-dependencies-${node.id}">
-              <div style="font-weight: bold; color: var(--slate); font-size: 14px; margin-bottom: 10px;">Topological Upstream Prerequisites:</div>
-              <div style="display: flex; flex-direction: column; gap: 8px; max-width: 600px;">
-                ${node.dependsOn.length > 0 ? 
-                  node.dependsOn.map(depId => {
-                    const depNode = planNodes.find(n => n.id === depId);
-                    if (!depNode) return "";
-                    return `
-                      <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; border: 1.5px solid var(--g200); background: var(--ivory); font-size: 12.5px;">
-                        <span><strong style="color: var(--clay);">#${depId}</strong>: ${depNode.title}</span>
-                        <span class="badge-status ${depNode.status}" style="font-size: 9px; padding: 2px 6px;">${depNode.status}</span>
-                      </div>
-                    `;
-                  }).join("")
-                  : `<span style="font-size: 12.5px; color: var(--g500); font-style: italic;">No upstream prerequisite stubs registered. This feature can be implemented independently.</span>`
-                }
-              </div>
+            <!-- Tab 4: Risks -->
+            <div class="tab-pane" id="pane-risks-${selectedPlanId}">
+              <div style="font-weight: bold; color: var(--slate); font-size: 14px; margin-bottom: 10px;">Risks &amp; Mitigation Strategies:</div>
+              <table class="risks-tab-table">
+                <thead>
+                  <tr>
+                    <th>Risk Description</th>
+                    <th>Severity</th>
+                    <th>Mitigation</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${risksHTML}
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Tab 5: Open Questions -->
+            <div class="tab-pane" id="pane-questions-${selectedPlanId}">
+              <div style="font-weight: bold; color: var(--slate); font-size: 14px; margin-bottom: 10px;">Open Design RFC Questions:</div>
+              ${questionsHTML}
             </div>
           </div>
         </div>
       `;
-    });
+    }
   }
 
-  function highlightNav(nodeId) {
-    document.querySelectorAll(".doc-nav-item").forEach(item => item.classList.remove("active"));
-    const activeLink = document.getElementById(`nav-link-${nodeId}`);
-    if (activeLink) activeLink.classList.add("active");
+  function selectPlan(planId) {
+    selectedPlanId = planId;
+    renderDocHub();
   }
 
   function switchSubPanelTab(button, paneId) {
@@ -758,45 +891,38 @@
     panel.style.display = isShowing ? "none" : "block";
   }
 
-  function openEditorForNode(nodeId) {
+  function openEditorForNode(planId) {
     toggleDocEditorPanel();
     const selector = document.getElementById("editor-select-node");
     if (selector) {
-      selector.value = nodeId;
-      populateEditorNodeFields(nodeId);
+      selector.value = planId;
+      populateEditorNodeFields(planId);
     }
   }
 
-  function populateEditorNodeFields(nodeId) {
-    const activePlan = archDatabase.savedPlans[archDatabase.activePlanId];
-    if (!activePlan || !activePlan.metadata) return;
-    const meta = activePlan.metadata[nodeId] || {};
+  function populateEditorNodeFields(planId) {
+    const plan = archDatabase.savedPlans[planId];
+    if (!plan) return;
 
-    document.getElementById("editor-doc-url").value = meta.docUrl || "";
-    document.getElementById("editor-doc-status").value = meta.docStatus || "";
-    document.getElementById("editor-doc-tldr").value = meta.docTldr || "";
-    document.getElementById("editor-doc-notes").value = (meta.docNotes || []).join("\n");
-    document.getElementById("editor-doc-snippet").value = meta.docSnippet || "";
+    document.getElementById("editor-doc-url").value = plan.docUrl || "";
+    document.getElementById("editor-doc-status").value = plan.docStatus || "";
+    document.getElementById("editor-doc-tldr").value = plan.docTldr || "";
+    document.getElementById("editor-doc-notes").value = (plan.docNotes || []).join("\n");
+    document.getElementById("editor-doc-snippet").value = plan.docSnippet || "";
   }
 
   async function saveEditorMetadata() {
-    const nodeId = document.getElementById("editor-select-node").value;
-    const activePlanId = archDatabase.activePlanId;
-    const plan = archDatabase.savedPlans[activePlanId];
+    const planId = document.getElementById("editor-select-node").value;
+    const plan = archDatabase.savedPlans[planId];
     
     if (plan) {
-      if (!plan.metadata) plan.metadata = {};
-      if (!plan.metadata[nodeId]) {
-        plan.metadata[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
-      }
-      
-      plan.metadata[nodeId].docUrl = document.getElementById("editor-doc-url").value.trim();
-      plan.metadata[nodeId].docStatus = document.getElementById("editor-doc-status").value;
-      plan.metadata[nodeId].docTldr = document.getElementById("editor-doc-tldr").value.trim();
+      plan.docUrl = document.getElementById("editor-doc-url").value.trim();
+      plan.docStatus = document.getElementById("editor-doc-status").value;
+      plan.docTldr = document.getElementById("editor-doc-tldr").value.trim();
       
       const rawNotes = document.getElementById("editor-doc-notes").value.split("\n");
-      plan.metadata[nodeId].docNotes = rawNotes.map(n => n.trim()).filter(n => n.length > 0);
-      plan.metadata[nodeId].docSnippet = document.getElementById("editor-doc-snippet").value.trim();
+      plan.docNotes = rawNotes.map(n => n.trim()).filter(n => n.length > 0);
+      plan.docSnippet = document.getElementById("editor-doc-snippet").value.trim();
 
       // Enforce direct sync to filesystem
       localStorage.setItem("wiki-architecture-state", JSON.stringify(archDatabase));
@@ -810,42 +936,52 @@
     }
   }
 
-  function copyRFCProposalMarkdown(nodeId) {
-    const node = planNodes.find(n => n.id === nodeId);
-    if (!node) return;
+  function copyRFCProposalMarkdown(planId) {
+    const plan = archDatabase.savedPlans[planId];
+    if (!plan) return;
+
+    const nodes = compilePlanNodes(planId);
 
     let md = [];
-    md.push(`# RFC: ${node.title}`);
-    md.push(`*PR/Issue Reference: #${node.id} | Binding: ${node.binding.toUpperCase()} | Layer: ${node.layer}*`);
+    md.push(`# RFC: Architectural Specification for ${plan.name}`);
+    md.push(`*Roadmap Plan Scope Specification RFC | Status: ${(plan.docStatus || 'drafting').toUpperCase()}*`);
     md.push("");
-    md.push(`## 📌 TL;DR Feature Explainer`);
-    md.push(node.docTldr ? node.docTldr : "No TL;DR design proposal written yet.");
+    md.push(`## 📌 High-Level TL;DR Specification`);
+    md.push(plan.docTldr ? plan.docTldr : "No TL;DR roadmap specification written yet.");
     md.push("");
     
-    if (node.docNotes && node.docNotes.length > 0) {
-      md.push(`## ⚠️ Gotchas &amp; Learning Constraints`);
-      node.docNotes.forEach(note => {
+    if (plan.docNotes && plan.docNotes.length > 0) {
+      md.push(`## ⚠️ Gotchas &amp; Spec Evolution Constraints`);
+      plan.docNotes.forEach(note => {
         md.push(`*   ${note}`);
       });
       md.push("");
     }
 
-    if (node.docSnippet) {
+    if (plan.docSnippet) {
       md.push(`## 💻 Proposed API Struct &amp; Config`);
       md.push("```typescript");
-      md.push(node.docSnippet);
+      md.push(plan.docSnippet);
       md.push("```");
       md.push("");
     }
 
-    if (node.docUrl) {
+    md.push("## 🚀 Target Slices &amp; Milestones Checklist");
+    md.push("| Issue/PR ID | Component Title | Subsystem Layer | Status |");
+    md.push("| --- | --- | --- | --- |");
+    nodes.forEach(n => {
+      md.push(`| #${n.id} | ${n.title} | ${n.layer} | \`${n.status.toUpperCase()}\` |`);
+    });
+    md.push("");
+
+    if (plan.docUrl) {
       md.push(`## 📄 Collaborative Writing Reference`);
-      md.push(`Thorough writeup and design reviews are detailed in the [Google Document](${node.docUrl}).`);
+      md.push(`Thorough architectural writeups and active reviews are detailed in the [Google Document](${plan.docUrl}).`);
     }
 
     const text = md.join("\n");
     navigator.clipboard.writeText(text).then(() => {
-      alert(`Successfully copied RFC proposal for #${node.id} to clipboard!`);
+      alert(`Successfully copied Roadmap RFC for "${plan.name}" to clipboard!`);
     }).catch(err => {
       alert("Failed to copy. Please extract content manually.");
     });

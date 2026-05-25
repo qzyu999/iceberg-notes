@@ -223,10 +223,24 @@
             "Java Engine"
           ]
         }
-      }
+      },
+      "docUrl": "https://docs.google.com/document/d/1RaaJ_WUDVlTMiuwu0mUa7XT_MzdYzXiXoTXx9uQ3fiI/",
+      "docStatus": "",
+      "docTldr": "",
+      "docNotes": [],
+      "docSnippet": ""
     },
     "plan-1779509761391": {
       "name": "PyIceberg Maintenance",
+      "docUrl": "https://docs.google.com/document/d/1RaaJ_WUDVlTMiuwu0mUa7XT_MzdYzXiXoTXx9uQ3fiI/",
+      "docStatus": "in-review",
+      "docTldr": "This roadmap designs maintenance, metadata pruning, and optimization sweeps for the PyIceberg project. It outlines direct CLI sweeps for orphan files, transactional retry stubs during conflict metadata swaps, and memory-safe Bloom filters for scaling massive tables.",
+      "docSnippet": "class RemoveOrphanFiles:\n    def __init__(self, table: Table, dry_run: bool = True, older_than_ms: int = 86400000):\n        self.table = table\n        self.dry_run = dry_run\n        self.older_than_ms = older_than_ms\n\n    def execute(self) -> List[str]:\n        # Lists orphan physical file paths not referenced in table manifest list metadata\n        pass",
+      "docNotes": [
+        "Validate S3 direct list limitations: large directory listings trigger S3 throttling and represent high cost.",
+        "Enforce strict 24-hour grace periods to avoid deleting newly added concurrent files before manifest commits.",
+        "Implement DynamoDB or conditional S3 conditional check-and-put stubs for transactional catalog swaps."
+      ],
       "risks": [
         {
           "risk": "<strong>Orphan File Cleanup Risk:</strong> Remove orphan files utility might delete newly added concurrent files before commit completes.",
@@ -371,6 +385,15 @@
     },
     "plan-1779594189720": {
       "name": "PyIceberg MoR",
+      "docUrl": "https://docs.google.com/document/d/1pyiceberg_mor_vectorized_reads/edit",
+      "docStatus": "drafting",
+      "docTldr": "This roadmap outlines high-performance Merge-on-Read (MoR) vectorized reads inside the python bindings. It implements position delete bitmap lookups, lazily mapped segment-level RoaringPositionBitmaps, and PyArrow vectorized filter engines on-the-fly.",
+      "docSnippet": "class RoaringPositionBitmap:\n    def __init__(self, buffer: bytes):\n        self.buffer = buffer\n        self.bitmap = RoaringBitmap.deserialize(buffer)\n\n    def contains(self, row_offset: int) -> bool:\n        return row_offset in self.bitmap",
+      "docNotes": [
+        "Load position deletes lazily once per manifest group to avoid massive overhead inside parallel scan loops.",
+        "Enforce vectorized binary search indices inside PyArrow RecordBatch columns for fast deletion vector masking.",
+        "Restrict first release scope strictly to reading V2 format specs, leaving MoR write pipelines for subsequent cycles."
+      ],
       "risks": [
         {
           "risk": "<strong>Delete Filter Latency in Scans:</strong> Applying position deletes on-the-fly inside table scan iterators drastically degrades throughput.",
@@ -522,5 +545,5 @@
       }
     }
   },
-  "activePlanId": "plan-1779594189720"
+  "activePlanId": "plan-1779509761391"
 }
