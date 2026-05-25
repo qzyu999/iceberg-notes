@@ -1,5 +1,18 @@
 [
   {
+    "number": "2193",
+    "title": "Add RoaringPositionBitmap",
+    "type": "pr",
+    "state": "closed",
+    "stateReason": null,
+    "binding": "python",
+    "author": "yingjianwu98",
+    "body": "<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- In the case this PR will resolve an issue, please replace ${GITHUB_ISSUE_ID} below with the actual Github issue id. -->\r\n<!-- Closes #${GITHUB_ISSUE_ID} -->\r\n\r\n# Rationale for this change\r\nThis is the first change to support deletion vector write in pyiceberg, where we build an abstraction on top of the Bitmap for various operations.\r\n\r\nJave implementation for [reference](https://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/deletes/RoaringPositionBitmap.java)\r\n\r\n# Are these changes tested?\r\nYes, I have added [all tests from Java](https://github.com/apache/iceberg/blob/main/core/src/test/java/org/apache/iceberg/deletes/TestRoaringPositionBitmap.java) except one that validates the ByteOrder as python bytes does not support Order like Java ByteBuffer\r\n\r\n# Are there any user-facing changes?\r\nNo, this is a new class that is currently not used in any existing code path.\r\n\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n",
+    "url": "https://github.com/apache/iceberg-python/pull/2193",
+    "incoming": [],
+    "outgoing": []
+  },
+  {
     "number": "3364",
     "title": "Feature: Incremental Append Scan",
     "type": "pr",
@@ -39,12 +52,12 @@
     "url": "https://github.com/apache/iceberg-python/pull/3320",
     "incoming": [],
     "outgoing": [
+      "3319",
       "819",
       "1935",
-      "3049",
-      "2050",
       "1938",
-      "3319"
+      "2050",
+      "3049"
     ]
   },
   {
@@ -61,12 +74,12 @@
       "3320"
     ],
     "outgoing": [
-      "819",
       "1935",
-      "3049",
-      "3131",
+      "1938",
       "2050",
-      "1938"
+      "3049",
+      "819",
+      "3131"
     ]
   },
   {
@@ -114,8 +127,8 @@
     ],
     "outgoing": [
       "3130",
-      "1092",
-      "3124"
+      "3124",
+      "1092"
     ]
   },
   {
@@ -132,8 +145,8 @@
       "3131"
     ],
     "outgoing": [
-      "1092",
-      "3124"
+      "3124",
+      "1092"
     ]
   },
   {
@@ -146,9 +159,7 @@
     "author": "ayushk7102",
     "body": "### Apache Iceberg version\n\n0.11.0\n\n### Please describe the bug 🐞\n\nCC @goutamvenkat-anyscale @koenvo @Fokko \n\nHello! We are implementing distributed writes from Ray Data to Iceberg. As part of upserts, we:\n\n1. Write data files in parallel across Ray workers (each worker writes its share of Parquet files directly to storage and returns `DataFile` metadata + the upsert key columns back to the driver)\n2. On the driver, concatenate all upsert keys collected from workers, call `create_match_filter` to build a delete predicate, then call `txn.delete()` followed by an append to commit\n\nUpserting 1M rows (383 MiB) into an Iceberg table takes **~17.5 minutes**, almost entirely in the delete step:\n\n```\ncreate_match_filter (1M keys → In filter):   10.26s\ntxn.delete():                              1054.35s\nappend + commit:                              1.14s\n─────────────────────────────────────────────────────\nTotal upsert commit:                       1065.75s\n```\n\nPyIceberg version `0.11.0`\n\nThis matches what's reported in #2159 and #2138.\n\nThe bottlenecks are:\n1. **`create_match_filter`** — constructs a Python `BooleanExpression` node per row, which is expensive at 1M+ keys\n2. **`txn.delete()`** — evaluates the resulting giant `In` expression against the table's data files with no partition pruning, effectively doing a full table scan\n\nWe have a few questions:\n\n1. **Merge-on-read upserts** — is this on the roadmap, and if so, roughly when? MoR would let us avoid the expensive delete + rewrite cycle entirely for large upserts.\n2. **Optimizing `create_match_filter` or `txn.delete()`** — is there a recommended way to speed these up today? For example, batching the `In` filter, or passing a partition-level hint to constrain the file scan?\n3. **Partition-aware deletes** — if the upsert key columns overlap with partition columns, is there a supported way to restrict `txn.delete()` to only the relevant partitions, rather than scanning the full table?\n\n## Related\n\n- #2159 — Upserting large table extremely slow\n- #2138 — Upsertion memory usage grows exponentially as table size grows\n- #2943 — Optimize upsert performance for large datasets\n\n\n### Willingness to contribute\n\n- [ ] I can contribute a fix for this bug independently\n- [x] I would be willing to contribute a fix for this bug with guidance from the Iceberg community\n- [ ] I cannot contribute a fix for this bug at this time",
     "url": "https://github.com/apache/iceberg-python/issues/3129",
-    "incoming": [
-      "2943"
-    ],
+    "incoming": [],
     "outgoing": [
       "2159",
       "2943"
@@ -165,8 +176,8 @@
     "body": "Closes #1092\r\n\r\n# Rationale for this change\r\nThis introduces a simplified, whole-table compaction strategy via the MaintenanceTable API (`table.maintenance.compact()`).\r\n\r\nKey implementation details:\r\n- Reads the entire table state into memory via `.to_arrow()`.\r\n  - Note: This initial implementation uses an in-memory Arrow-based rewrite strategy. Future iterations can extend this to support streaming or distributed rewrites for larger-than-memory datasets.\r\n- Uses `table.overwrite()` to rewrite data, leveraging PyIceberg's target file bin-packing (`write.target-file-size-bytes`) natively.\r\n- Ensures atomicity by executing within a table transaction.\r\n- Explicitly sets `snapshot-type: replace` and `replace-operation: compaction` to ensure correct metadata history for downstream engines.\r\n- Includes a guard to safely ignore compaction requests on empty tables.\r\n\r\n## Are these changes tested?\r\nIncludes full Pytest coverage in `tests/table/test_maintenance.py`.\r\n\r\n## Are there any user-facing changes?\r\nYes. This PR adds a new compact() method to the TableMaintenance API, allowing users to perform file compaction on existing Iceberg tables.\r\n\r\nExample usage:\r\n```Python\r\ntable = catalog.load_table(\"default.my_table\")\r\n# Merges small files into larger ones based on table properties\r\ntable.maintenance.compact()\r\n```\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n\r\nEdit: It looks like I'm not able to add the changelog label, hopefully someone with permissions can do so.\r\n",
     "url": "https://github.com/apache/iceberg-python/pull/3124",
     "incoming": [
-      "3130",
-      "3131"
+      "3131",
+      "3130"
     ],
     "outgoing": [
       "1092"
@@ -199,13 +210,13 @@
     "body": "<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- In the case this PR will resolve an issue, please replace ${GITHUB_ISSUE_ID} below with the actual Github issue id. -->\r\nCloses #1930 \r\nCloses #1931 \r\n\r\n# Rationale for this change\r\n\r\nNow that we have an implementation of DeleteFileIndex we can move ahead and implement the last two safety concurrency validations mentioned in this #819 \r\n\r\n## Are these changes tested?\r\n\r\nYes\r\n\r\n## Are there any user-facing changes?\r\n\r\nNo\r\n\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n",
     "url": "https://github.com/apache/iceberg-python/pull/3049",
     "incoming": [
-      "3319",
-      "3320"
+      "3320",
+      "3319"
     ],
     "outgoing": [
       "1930",
-      "819",
-      "1931"
+      "1931",
+      "819"
     ]
   },
   {
@@ -223,8 +234,7 @@
       "3118"
     ],
     "outgoing": [
-      "2159",
-      "3129"
+      "2159"
     ]
   },
   {
@@ -286,8 +296,8 @@
     "url": "https://github.com/apache/iceberg-python/issues/2159",
     "incoming": [
       "3129",
-      "2943",
-      "3118"
+      "3118",
+      "2943"
     ],
     "outgoing": []
   },
@@ -304,8 +314,8 @@
     "incoming": [],
     "outgoing": [
       "1880",
-      "2142",
-      "1200"
+      "1200",
+      "2142"
     ]
   },
   {
@@ -337,12 +347,12 @@
     "body": "<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- In the case this PR will resolve an issue, please replace ${GITHUB_ISSUE_ID} below with the actual Github issue id. -->\r\n<!-- Closes #${GITHUB_ISSUE_ID} -->\r\n\r\nCloses #1929\r\n\r\n# Rationale for this change\r\n\r\n- Since we want to support snapshot write compatibility (#1772) and is part of the following parent issue #819\r\n\r\n# Are these changes tested?\r\n\r\nYes\r\n\r\n# Are there any user-facing changes?\r\n\r\nNo\r\n\r\n<!-- In the case of user-facing changes, please add the changelog label. -->\r\n",
     "url": "https://github.com/apache/iceberg-python/pull/2050",
     "incoming": [
-      "3319",
-      "3320"
+      "3320",
+      "3319"
     ],
     "outgoing": [
-      "819",
-      "1929"
+      "1929",
+      "819"
     ]
   },
   {
@@ -371,8 +381,8 @@
     "body": "Closes #1928 \r\n\r\n# Rationale for this change\r\nAdd `validate_deleted_data_files` which depends on #1935 \r\n\r\n# Are these changes tested?\r\nAdded a test!\r\n\r\n# References\r\n\r\nJava `deletedDataFiles` impl:\r\nhttps://github.com/apache/iceberg/blob/3a29199e73f2e9ae0f8f92a1a0732a338c66aa0d/core/src/main/java/org/apache/iceberg/MergingSnapshotProducer.java#L678\r\n\r\nJava `ManifestGroup.entries` impl:\r\nhttps://github.com/apache/iceberg/blob/3a29199e73f2e9ae0f8f92a1a0732a338c66aa0d/core/src/main/java/org/apache/iceberg/ManifestGroup.java#L242",
     "url": "https://github.com/apache/iceberg-python/pull/1938",
     "incoming": [
-      "3319",
-      "3320"
+      "3320",
+      "3319"
     ],
     "outgoing": [
       "1928",
@@ -390,13 +400,11 @@
     "body": "<!--\r\nThanks for opening a pull request!\r\n-->\r\n\r\n<!-- In the case this PR will resolve an issue, please replace ${GITHUB_ISSUE_ID} below with the actual Github issue id. -->\r\n<!-- Closes #${GITHUB_ISSUE_ID} -->\r\n\r\n# Rationale for this change\r\nAdds `validation_history` that will be used in support of https://github.com/apache/iceberg-python/issues/819\r\n\r\nAlso adds `ancestors_between`.\r\n\r\nBased off of the java implementation but we will likely want changes that feel more like python :). Already took a few liberties there\r\n\r\n# Are these changes tested?\r\nAdded tests\r\n\r\n# References:\r\n\r\njava implementation of `validation_history`:\r\nhttps://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/MergingSnapshotProducer.java#L859\r\n\r\n\r\njava implementation of `ancestors_between`:\r\nhttps://github.com/apache/iceberg/blob/main/core/src/main/java/org/apache/iceberg/util/SnapshotUtil.java#L213\r\n",
     "url": "https://github.com/apache/iceberg-python/pull/1935",
     "incoming": [
-      "1938",
+      "3320",
       "3319",
-      "3320"
+      "1938"
     ],
-    "outgoing": [
-      "819"
-    ]
+    "outgoing": []
   },
   {
     "number": "1931",
@@ -468,8 +476,8 @@
     "body": "\r\n\r\n\r\n\r\n## Summary\r\n\r\nThis PR Closes issue #516 by implementing support for the `ExpireSnapshot` table metadata action.\r\n\r\n## Rationale\r\n\r\nThe `ExpireSnapshot` action is a core part of Iceberg’s table maintenance APIs. Adding support for this action in PyIceberg helps ensure feature parity with other language implementations (e.g., Java) and supports users who want to programmatically manage snapshot retention using PyIceberg’s public API.\r\n\r\n## Testing\r\n\r\n- Unit tests have been added to cover the initial expected usage paths.\r\n- Additional feedback on edge cases, missing test scenarios or corrections to the setup test logic is greatly welcome during the review process.\r\n\r\n## User-facing changes\r\n\r\n- This change introduces a new public API: `ExpireSnapshot`.\r\n- No breaking changes or modifications to existing APIs were made.\r\n\r\n---",
     "url": "https://github.com/apache/iceberg-python/pull/1880",
     "incoming": [
-      "2142",
-      "2143"
+      "2143",
+      "2142"
     ],
     "outgoing": [
       "516"
@@ -525,9 +533,7 @@
     "body": "This is an initial implementation of rewrite manifests, aiming to mimic the Java implementation as closely as possible. I’ve tried to follow the same structure and logic, but there are still some areas that might need refinement.\r\n\r\nI’m looking for feedback and suggestions on:\r\n\t•\tWhether the approach aligns well with the existing design.\r\n\t•\tAny gaps or optimizations that could improve performance.\r\n\t•\tHow best to proceed with completing this feature.\r\n\r\nWould love any insights or guidance on the next steps! Thanks in advance for the review! 🙌",
     "url": "https://github.com/apache/iceberg-python/pull/1661",
     "incoming": [],
-    "outgoing": [
-      "270"
-    ]
+    "outgoing": []
   },
   {
     "number": "1607",
@@ -585,11 +591,10 @@
     "body": "Introduce a new API to delete orphan files for a given table\r\n\r\nFeature reference: https://iceberg.apache.org/docs/1.5.1/maintenance/#delete-orphan-files",
     "url": "https://github.com/apache/iceberg-python/issues/1200",
     "incoming": [
-      "1958",
-      "1065",
-      "31",
+      "2143",
       "2142",
-      "2143"
+      "1958",
+      "1065"
     ],
     "outgoing": []
   },
@@ -605,8 +610,7 @@
     "url": "https://github.com/apache/iceberg-python/issues/1199",
     "incoming": [
       "1607",
-      "1065",
-      "31"
+      "1065"
     ],
     "outgoing": []
   },
@@ -621,11 +625,10 @@
     "body": "Introduce an API to compact data files. The first version of the API will do the following:\r\n- take a predicate expression as input parameter to find data files matching the filter that will be re-written\r\n- group data files by partitions and rewrite them using the same bin-packing constraints of the writer\r\n",
     "url": "https://github.com/apache/iceberg-python/issues/1092",
     "incoming": [
-      "3124",
-      "3130",
       "3131",
-      "1065",
-      "31"
+      "3130",
+      "3124",
+      "1065"
     ],
     "outgoing": []
   },
@@ -654,12 +657,12 @@
     "url": "https://github.com/apache/iceberg-python/issues/1065",
     "incoming": [],
     "outgoing": [
-      "736",
-      "1199",
-      "270",
-      "1092",
       "31",
-      "1200"
+      "1199",
+      "1200",
+      "1092",
+      "270",
+      "736"
     ]
   },
   {
@@ -673,11 +676,10 @@
     "body": "### Feature Request / Improvement\n\nSupport enforcing Isolation Levels from specified snapshot ID \n\nhttps://iceberg.apache.org/docs/latest/spark-configuration/#write-options\n\nThere's been a lot of continued interest in using multiple PyIceberg applications concurrently and having proper support for optimistic concurrency.\n\nI think the best place to start is through the implementation of the individual validation functions\n\n\nOnce this is complete, we'll be able to introduce the Isolation Levels and correctly implement the validation logic in the _OverwriteFiles snapshot producer, similarly to the [Java implementation](https://github.com/apache/iceberg/blob/9fc49e187069c7ec2493ac0abf20f73175b3df89/core/src/main/java/org/apache/iceberg/BaseOverwriteFiles.java#L121-L164)",
     "url": "https://github.com/apache/iceberg-python/issues/819",
     "incoming": [
-      "1935",
-      "2050",
-      "3049",
+      "3320",
       "3319",
-      "3320"
+      "3049",
+      "2050"
     ],
     "outgoing": []
   },
@@ -707,8 +709,7 @@
     "body": "### Feature Request / Improvement\r\n\r\nSupport Maintenance operations on PyIceberg: https://iceberg.apache.org/docs/1.4.0/maintenance\r\n\r\nAll operations except for data file compaction are metadata-only or file system operations, so supporting them on PyIceberg may be a small lift",
     "url": "https://github.com/apache/iceberg-python/issues/516",
     "incoming": [
-      "1880",
-      "31"
+      "1880"
     ],
     "outgoing": []
   },
@@ -723,9 +724,7 @@
     "body": "### Feature Request / Improvement\n\nAdd support for compaction. This rewrites the existing manifests into a single one, reducing the number of calls to the object store. This should follow the Java configuration keys:\r\n\r\n- `commit.manifest-merge.enabled`: Controls whether to automatically merge manifests on writes.\r\n- `commit.manifest.min-count-to-merge`: Minimum number of manifests to accumulate before merging.\r\n- `commit.manifest.target-size-bytes`: Target size when merging manifest files.",
     "url": "https://github.com/apache/iceberg-python/issues/270",
     "incoming": [
-      "1661",
-      "1065",
-      "31"
+      "1065"
     ],
     "outgoing": []
   },
@@ -757,12 +756,6 @@
     "incoming": [
       "1065"
     ],
-    "outgoing": [
-      "1199",
-      "270",
-      "516",
-      "1092",
-      "1200"
-    ]
+    "outgoing": []
   }
 ]

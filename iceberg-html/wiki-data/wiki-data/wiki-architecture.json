@@ -3,6 +3,7 @@
     "full-collection": {
       "name": "Full Collection Roadmap",
       "nodes": [
+        "2193",
         "3364",
         "3361",
         "3320",
@@ -150,6 +151,48 @@
               "completed": false
             }
           ]
+        },
+        "9120": {
+          "layer": "Maintenance & GC",
+          "status": "complete",
+          "customDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "Java Engine"
+          ]
+        },
+        "9201": {
+          "layer": "Planning & Scans",
+          "status": "planned",
+          "customDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "Nanosecond Support"
+          ]
+        },
+        "9250": {
+          "layer": "Planning & Scans",
+          "status": "complete",
+          "customDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "Nanosecond Support",
+            "Python Engine"
+          ]
+        },
+        "9280": {
+          "layer": "Row-Level Ops",
+          "status": "in-progress",
+          "customDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "Nanosecond Support",
+            "Java Engine"
+          ]
         }
       }
     },
@@ -274,9 +317,117 @@
         "2261",
         "2822",
         "1808",
-        "3364"
+        "2193"
       ],
-      "metadata": {}
+      "metadata": {
+        "1078": {
+          "layer": "Row-Level Ops",
+          "status": "planned",
+          "customDependsOn": [],
+          "ignoredDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "V2"
+          ]
+        },
+        "1516": {
+          "layer": "Catalog Operations",
+          "status": "complete",
+          "customDependsOn": [],
+          "ignoredDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "DVs",
+            "V3"
+          ]
+        },
+        "1549": {
+          "layer": "Catalog Operations",
+          "status": "complete",
+          "customDependsOn": [],
+          "ignoredDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "DVs",
+            "V3"
+          ]
+        },
+        "1808": {
+          "layer": "Row-Level Ops",
+          "status": "planned",
+          "customDependsOn": [],
+          "ignoredDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "PosDel",
+            "V2"
+          ]
+        },
+        "2193": {
+          "layer": "Row-Level Ops",
+          "status": "blocked",
+          "customDependsOn": [],
+          "ignoredDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "V3",
+            "DVs"
+          ]
+        },
+        "2261": {
+          "layer": "Catalog Operations",
+          "status": "planned",
+          "customDependsOn": [],
+          "ignoredDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "DVs",
+            "V3"
+          ]
+        },
+        "2822": {
+          "layer": "Catalog Operations",
+          "status": "blocked",
+          "customDependsOn": [],
+          "ignoredDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "DVs",
+            "V3"
+          ]
+        },
+        "3270": {
+          "layer": "Row-Level Ops",
+          "status": "planned",
+          "customDependsOn": [],
+          "ignoredDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "EqDel",
+            "V2"
+          ]
+        },
+        "3285": {
+          "layer": "Row-Level Ops",
+          "status": "planned",
+          "customDependsOn": [],
+          "ignoredDependsOn": [],
+          "customTasks": [],
+          "taskStates": {},
+          "visualGroups": [
+            "EqDel",
+            "V2"
+          ]
+        }
+      }
     }
   },
   "activePlanId": "plan-1779594189720"
