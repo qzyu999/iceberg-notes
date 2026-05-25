@@ -381,8 +381,11 @@
   </div>
 
   <div class="drawer-form-group">
-    <label for="block-visual-group">Visual Grouping (Custom Subgraph Name)</label>
-    <input type="text" id="block-visual-group" class="matrix-search-input" style="width: 100%; box-sizing: border-box; margin: 4px 0 0;" placeholder="e.g. Deletion Vectors">
+    <label for="block-visual-group">Visual Groupings (Comma-separated for multiple)</label>
+    <input type="text" id="block-visual-group" class="matrix-search-input" style="width: 100%; box-sizing: border-box; margin: 4px 0 0;" placeholder="e.g. Deletion Vectors, Merge-on-Read">
+    <span style="font-size: 11px; color: var(--g500); margin-top: 4px; display: inline-block;">
+      Nodes in multiple groups will experience split attraction and sit stably in the overlapping boundaries.
+    </span>
   </div>
 
   <div class="drawer-form-group">
@@ -537,9 +540,45 @@
 
   // Ensures archDatabase contains the savedPlans schema and handles legacy migration cleanly
   function alignPlannerDatabaseSchema() {
+    const defaultMockMeta = {
+      "9280": {
+        layer: "Row-Level Ops",
+        status: "in-progress",
+        visualGroups: ["Nanosecond Support", "Java Engine"]
+      },
+      "9250": {
+        layer: "Planning & Scans",
+        status: "complete",
+        visualGroups: ["Nanosecond Support", "Python Engine"]
+      },
+      "9201": {
+        layer: "Planning & Scans",
+        status: "planned",
+        visualGroups: ["Nanosecond Support"]
+      },
+      "9120": {
+        layer: "Maintenance & GC",
+        status: "complete",
+        visualGroups: ["Java Engine"]
+      }
+    };
+
     if (!archDatabase || typeof archDatabase !== "object" || Array.isArray(archDatabase) || !archDatabase.savedPlans) {
       // Gather any legacy overlays
       const legacyMetadata = {};
+      
+      // Inject standard showcase visual groups into mock nodes on first load
+      Object.keys(defaultMockMeta).forEach(id => {
+        legacyMetadata[id] = {
+          layer: defaultMockMeta[id].layer,
+          status: defaultMockMeta[id].status,
+          customDependsOn: [],
+          customTasks: [],
+          taskStates: {},
+          visualGroups: defaultMockMeta[id].visualGroups
+        };
+      });
+
       if (Array.isArray(archDatabase)) {
         archDatabase.forEach(item => {
           if (item && item.id) {
@@ -553,7 +592,7 @@
                 completed: t.completed || false
               })),
               taskStates: {},
-              visualGroup: item.visualGroup || null
+              visualGroups: item.visualGroups || (item.visualGroup ? [item.visualGroup] : [])
             };
           }
         });
@@ -578,8 +617,26 @@
     }
 
     // Always keep Full Collection roadmap updated with all active collection items
-    if (archDatabase.savedPlans["full-collection"]) {
-      archDatabase.savedPlans["full-collection"].nodes = ghDatabase.map(item => item.number);
+    const fullPlan = archDatabase.savedPlans["full-collection"];
+    if (fullPlan) {
+      fullPlan.nodes = ghDatabase.map(item => item.number);
+      if (!fullPlan.metadata) fullPlan.metadata = {};
+      
+      // Backport showcase mock visual groups to make sandbox look gorgeous
+      Object.keys(defaultMockMeta).forEach(id => {
+        if (!fullPlan.metadata[id]) {
+          fullPlan.metadata[id] = {
+            layer: defaultMockMeta[id].layer,
+            status: defaultMockMeta[id].status,
+            customDependsOn: [],
+            customTasks: [],
+            taskStates: {},
+            visualGroups: defaultMockMeta[id].visualGroups
+          };
+        } else if (!fullPlan.metadata[id].visualGroups || fullPlan.metadata[id].visualGroups.length === 0) {
+          fullPlan.metadata[id].visualGroups = defaultMockMeta[id].visualGroups;
+        }
+      });
     }
 
     if (!archDatabase.activePlanId || !archDatabase.savedPlans[archDatabase.activePlanId]) {
@@ -628,7 +685,7 @@
 
         const layer = overlay.layer || defaultLayer;
         const status = overlay.status || defaultStatus;
-        const visualGroup = overlay.visualGroup || null;
+        const visualGroups = overlay.visualGroups || (overlay.visualGroup ? [overlay.visualGroup] : []);
         const customDependsOn = overlay.customDependsOn || [];
         const ignoredDependsOn = overlay.ignoredDependsOn || [];
         const customTasks = overlay.customTasks || [];
@@ -667,7 +724,7 @@
           url: item.url,
           layer: layer,
           status: status,
-          visualGroup: visualGroup,
+          visualGroups: visualGroups,
           state: item.state,
           stateReason: item.stateReason || item.state_reason || null,
           dependsOn: dependsOn,
@@ -797,8 +854,16 @@
         </td>
         <td style="font-weight: 600; color: var(--slate); cursor: pointer;">
           ${node.title}
-          <div style="font-size: 10px; color: var(--g500); font-weight: normal; margin-top: 3px; text-transform: uppercase;">
-            ${node.type} | @${node.author}
+          <div style="font-size: 10px; color: var(--g500); font-weight: normal; margin-top: 3px; text-transform: uppercase; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span>${node.type} | @${node.author}</span>
+            ${(node.visualGroups || []).map(gName => {
+              let hash = 0;
+              for (let i = 0; i < gName.length; i++) {
+                hash = gName.charCodeAt(i) + ((hash << 5) - hash);
+              }
+              const hue = Math.abs(hash % 360);
+              return `<span style="font-size: 8.5px; font-weight: bold; background: hsla(${hue}, 60%, 40%, 0.1); color: hsla(${hue}, 70%, 30%, 1); border: 1.5px solid hsla(${hue}, 60%, 40%, 0.15); padding: 0.5px 4px; border-radius: 3px; font-family: var(--sans);">${gName.toUpperCase()}</span>`;
+            }).join("")}
           </div>
         </td>
         <td style="font-size: 12px; color: var(--g700); font-weight: 500;">
@@ -914,6 +979,19 @@
         <p style="font-size: 11.5px; color: var(--g500); font-family: var(--mono); margin-top: -4px; margin-bottom: 8px;">
           Author: @${active.author} | Language binding: ${active.binding.toUpperCase()} | Type: ${active.type.toUpperCase()}
         </p>
+        ${(active.visualGroups || []).length > 0 ? `
+          <div style="margin-top: -4px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span style="font-size: 10px; font-weight: 800; color: var(--g500); font-family: var(--sans); letter-spacing: 0.02em;">GROUPS:</span>
+            ${(active.visualGroups || []).map(gName => {
+              let hash = 0;
+              for (let i = 0; i < gName.length; i++) {
+                hash = gName.charCodeAt(i) + ((hash << 5) - hash);
+              }
+              const hue = Math.abs(hash % 360);
+              return `<span style="font-size: 10px; font-weight: bold; background: hsla(${hue}, 60%, 40%, 0.15); color: hsla(${hue}, 70%, 30%, 1); border: 1px solid hsla(${hue}, 60%, 40%, 0.3); padding: 1.5px 6px; border-radius: 4px; font-family: var(--sans); letter-spacing: 0.02em;">${gName.toUpperCase()}</span>`;
+            }).join("")}
+          </div>
+        ` : ''}
         <div style="background: var(--ivory); border: 1.5px solid var(--g300); border-radius: 8px; padding: 12px 16px; font-size: 13px; line-height: 1.5; color: var(--g700); max-height: 100px; overflow-y: auto;">
           ${active.desc || '<em>No description provided.</em>'}
         </div>
@@ -1209,21 +1287,21 @@
     const hMargin = 80;
 
     // Collect all unique non-empty visualGroups
-    const uniqueGroups = [...new Set(simulationNodes.map(n => n.visualGroup).filter(g => g))];
+    const uniqueGroups = [...new Set(simulationNodes.flatMap(n => n.visualGroups || []).filter(g => g))];
     
     // Calculate centroids of each group for intra-group cohesion
     const groupCentroids = {};
     const groupCounts = {};
     simulationNodes.forEach(node => {
-      if (node.visualGroup) {
-        if (!groupCentroids[node.visualGroup]) {
-          groupCentroids[node.visualGroup] = { x: 0, y: 0 };
-          groupCounts[node.visualGroup] = 0;
+      (node.visualGroups || []).forEach(gName => {
+        if (!groupCentroids[gName]) {
+          groupCentroids[gName] = { x: 0, y: 0 };
+          groupCounts[gName] = 0;
         }
-        groupCentroids[node.visualGroup].x += node.x;
-        groupCentroids[node.visualGroup].y += node.y;
-        groupCounts[node.visualGroup]++;
-      }
+        groupCentroids[gName].x += node.x;
+        groupCentroids[gName].y += node.y;
+        groupCounts[gName]++;
+      });
     });
     Object.keys(groupCentroids).forEach(gName => {
       groupCentroids[gName].x /= groupCounts[gName];
@@ -1238,17 +1316,21 @@
           : width / 2;
         node.vx += (targetX - node.x) * kLayering;
 
-        // Determine target Y based on visualGroup vertical distribution
+        // Determine target Y based on visualGroups vertical distribution (average Y)
         let targetY = centerY;
-        if (node.visualGroup && uniqueGroups.length > 0) {
-          const gIdx = uniqueGroups.indexOf(node.visualGroup);
-          const paddingY = 90;
-          const availableHeight = height - 2 * paddingY;
-          if (uniqueGroups.length === 1) {
-            targetY = centerY;
-          } else {
-            targetY = paddingY + (gIdx / (uniqueGroups.length - 1)) * availableHeight;
-          }
+        const assignedGroups = node.visualGroups || [];
+        if (assignedGroups.length > 0 && uniqueGroups.length > 0) {
+          let sumY = 0;
+          assignedGroups.forEach(gName => {
+            const gIdx = uniqueGroups.indexOf(gName);
+            const paddingY = 90;
+            const availableHeight = height - 2 * paddingY;
+            const gTargetY = uniqueGroups.length === 1
+              ? centerY
+              : paddingY + (gIdx / (uniqueGroups.length - 1)) * availableHeight;
+            sumY += gTargetY;
+          });
+          targetY = sumY / assignedGroups.length;
         }
         
         // Pull towards target Y lane
@@ -1256,10 +1338,14 @@
         node.vy += dy * kGravityY;
 
         // Apply intra-group cohesion to cluster group nodes tightly
-        if (node.visualGroup && groupCentroids[node.visualGroup]) {
-          const centroid = groupCentroids[node.visualGroup];
-          node.vx += (centroid.x - node.x) * kGroupCohesion;
-          node.vy += (centroid.y - node.y) * kGroupCohesion;
+        if (assignedGroups.length > 0) {
+          assignedGroups.forEach(gName => {
+            if (groupCentroids[gName]) {
+              const centroid = groupCentroids[gName];
+              node.vx += (centroid.x - node.x) * (kGroupCohesion / assignedGroups.length);
+              node.vy += (centroid.y - node.y) * (kGroupCohesion / assignedGroups.length);
+            }
+          });
         }
       }
     });
@@ -1334,36 +1420,31 @@
     if (groupGroup) {
       groupGroup.innerHTML = "";
       
-      // Group simulation nodes by visualGroup name
+      // Group simulation nodes by visualGroups name
       const groups = {};
       simulationNodes.forEach(node => {
-        if (node.visualGroup) {
-          if (!groups[node.visualGroup]) {
-            groups[node.visualGroup] = [];
+        (node.visualGroups || []).forEach(groupName => {
+          if (!groups[groupName]) {
+            groups[groupName] = [];
           }
-          groups[node.visualGroup].push(node);
-        }
+          groups[groupName].push(node);
+        });
       });
       
-      // Draw a boundary box for each group
+      // Draw a boundary box or organic bubble path for each group
       Object.keys(groups).forEach(groupName => {
         const nodes = groups[groupName];
+        
+        // Compute bounding metrics for the group label placement
         let minX = Infinity, minY = Infinity;
         let maxX = -Infinity, maxY = -Infinity;
-        
         nodes.forEach(node => {
           if (node.x < minX) minX = node.x;
           if (node.x > maxX) maxX = node.x;
           if (node.y < minY) minY = node.y;
           if (node.y > maxY) maxY = node.y;
         });
-        
-        const padding = 35;
-        const rectX = minX - padding;
-        const rectY = minY - padding;
-        const rectW = (maxX - minX) + 2 * padding;
-        const rectH = (maxY - minY) + 2 * padding;
-        
+
         // Generate a stable color hue based on group name
         let hash = 0;
         for (let i = 0; i < groupName.length; i++) {
@@ -1372,27 +1453,135 @@
         const hue = Math.abs(hash % 360);
         
         const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+
+        // Define padding and compute boundary shape path
+        const padding = 35;
+        let pathD = "";
         
-        // Bounding rect
-        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-        rect.setAttribute("x", rectX);
-        rect.setAttribute("y", rectY);
-        rect.setAttribute("width", rectW);
-        rect.setAttribute("height", rectH);
-        rect.setAttribute("rx", "12");
-        rect.setAttribute("ry", "12");
-        rect.setAttribute("fill", `hsla(${hue}, 50%, 94%, 0.45)`);
-        rect.setAttribute("stroke", `hsla(${hue}, 60%, 40%, 0.7)`);
-        rect.setAttribute("stroke-width", "2");
-        rect.setAttribute("stroke-dasharray", "6,4");
+        if (nodes.length === 1) {
+          // Case 1: Single node — draw a beautiful concentric circular halo
+          const node = nodes[0];
+          const R = padding + 20; // Enclose node circle with margin
+          pathD = `M ${node.x}, ${node.y - R} A ${R} ${R} 0 1,1 ${node.x}, ${node.y + R} A ${R} ${R} 0 1,1 ${node.x}, ${node.y - R}`;
+        } else if (nodes.length === 2) {
+          // Case 2: Exactly two nodes — draw a gorgeous, smooth rounded capsule enclosing both
+          const A = nodes[0];
+          const B = nodes[1];
+          const dx = B.x - A.x;
+          const dy = B.y - A.y;
+          const len = Math.sqrt(dx*dx + dy*dy) || 0.1;
+          const ux = dx / len;
+          const uy = dy / len;
+          const nx = uy;
+          const ny = -ux;
+          
+          const R = padding + 20; // Capsule padding
+          const p1 = { x: A.x + R * nx, y: A.y + R * ny };
+          const p2 = { x: B.x + R * nx, y: B.y + R * ny };
+          const p3 = { x: B.x - R * nx, y: B.y - R * ny };
+          const p4 = { x: A.x - R * nx, y: A.y - R * ny };
+          
+          pathD = `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} A ${R} ${R} 0 0 1 ${p3.x} ${p3.y} L ${p4.x} ${p4.y} A ${R} ${R} 0 0 1 ${p1.x} ${p1.y}`;
+        } else {
+          // Case 3: Three or more nodes — compute the convex hull polygon and offset its edges
+          // Monotone Chain convex hull algorithm
+          const pts = nodes.map(n => ({ x: n.x, y: n.y }));
+          pts.sort((a, b) => a.x !== b.x ? a.x - b.x : a.y - b.y);
+          
+          const lower = [];
+          for (const p of pts) {
+            while (lower.length >= 2) {
+              const o = lower[lower.length - 2];
+              const a = lower[lower.length - 1];
+              if ((a.x - o.x) * (p.y - o.y) - (a.y - o.y) * (p.x - o.x) <= 0) lower.pop();
+              else break;
+            }
+            lower.push(p);
+          }
+          
+          const upper = [];
+          for (let i = pts.length - 1; i >= 0; i--) {
+            const p = pts[i];
+            while (upper.length >= 2) {
+              const o = upper[upper.length - 2];
+              const a = upper[upper.length - 1];
+              if ((a.x - o.x) * (p.y - o.y) - (a.y - o.y) * (p.x - o.x) <= 0) upper.pop();
+              else break;
+            }
+            upper.push(p);
+          }
+          
+          lower.pop();
+          upper.pop();
+          const hull = lower.concat(upper);
+          const k = hull.length;
+          
+          if (k < 3) {
+            // Fallback to capsule logic if hull degenerates
+            const A = pts[0];
+            const B = pts[pts.length - 1];
+            const dx = B.x - A.x;
+            const dy = B.y - A.y;
+            const len = Math.sqrt(dx*dx + dy*dy) || 0.1;
+            const ux = dx / len;
+            const uy = dy / len;
+            const nx = uy;
+            const ny = -ux;
+            const R = padding + 20;
+            const p1 = { x: A.x + R * nx, y: A.y + R * ny };
+            const p2 = { x: B.x + R * nx, y: B.y + R * ny };
+            const p3 = { x: B.x - R * nx, y: B.y - R * ny };
+            const p4 = { x: A.x - R * nx, y: A.y - R * ny };
+            pathD = `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} A ${R} ${R} 0 0 1 ${p3.x} ${p3.y} L ${p4.x} ${p4.y} A ${R} ${R} 0 0 1 ${p1.x} ${p1.y}`;
+          } else {
+            // Draw a mathematically perfect rounded convex hull outline!
+            const R = padding + 20; // Constant padding radius
+            const edges = [];
+            for (let i = 0; i < k; i++) {
+              const A = hull[i];
+              const B = hull[(i + 1) % k];
+              const dx = B.x - A.x;
+              const dy = B.y - A.y;
+              const len = Math.sqrt(dx*dx + dy*dy) || 0.1;
+              const ux = dx / len;
+              const uy = dy / len;
+              const nx = uy;
+              const ny = -ux;
+              edges.push({
+                start: { x: A.x + R * nx, y: A.y + R * ny },
+                end: { x: B.x + R * nx, y: B.y + R * ny }
+              });
+            }
+            
+            pathD = `M ${edges[0].start.x} ${edges[0].start.y}`;
+            for (let i = 0; i < k; i++) {
+              const nextIdx = (i + 1) % k;
+              pathD += ` L ${edges[i].end.x} ${edges[i].end.y} A ${R} ${R} 0 0 1 ${edges[nextIdx].start.x} ${edges[nextIdx].start.y}`;
+            }
+            pathD += ' Z';
+          }
+        }
+
+        // Draw organic bubble boundary path
+        const bubble = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        bubble.setAttribute("d", pathD);
+        bubble.setAttribute("fill", `hsla(${hue}, 50%, 94%, 0.45)`);
+        bubble.setAttribute("stroke", `hsla(${hue}, 60%, 40%, 0.7)`);
+        bubble.setAttribute("stroke-width", "2");
+        bubble.setAttribute("stroke-dasharray", "6,4");
+        bubble.setAttribute("stroke-linejoin", "round");
+        bubble.style.transition = "all 0.15s ease-out";
         
-        g.appendChild(rect);
-        
-        // Group title label background pill
+        g.appendChild(bubble);
+
+        // Group title label background pill positioned at the top-left boundary of the group area
+        const labelX = minX - padding + 10;
+        const labelY = minY - padding - 12;
         const labelWidth = groupName.length * 6.5 + 16;
+        
         const labelBg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-        labelBg.setAttribute("x", rectX + 10);
-        labelBg.setAttribute("y", rectY - 12);
+        labelBg.setAttribute("x", labelX);
+        labelBg.setAttribute("y", labelY);
         labelBg.setAttribute("width", labelWidth);
         labelBg.setAttribute("height", "18");
         labelBg.setAttribute("rx", "5");
@@ -1403,8 +1592,8 @@
         
         // Group title label text
         const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        label.setAttribute("x", rectX + 10 + labelWidth / 2);
-        label.setAttribute("y", rectY + 1);
+        label.setAttribute("x", labelX + labelWidth / 2);
+        label.setAttribute("y", labelY + 13); // Centered inside 18px height
         label.setAttribute("text-anchor", "middle");
         label.setAttribute("fill", "var(--paper)");
         label.setAttribute("font-size", "9px");
@@ -1551,9 +1740,41 @@
       nameText.textContent = shortTitle;
       g.appendChild(nameText);
 
+      // Draw small horizontal group tag indicators below the title text
+      const groupsCount = (node.visualGroups || []).length;
+      if (groupsCount > 0) {
+        const dotRadius = 3;
+        const dotSpacing = 8;
+        const totalWidth = (groupsCount - 1) * dotSpacing;
+        const startX = node.x - totalWidth / 2;
+        const dotY = node.y + (isSelected ? 48 : 42);
+        
+        node.visualGroups.forEach((gName, gIdx) => {
+          let hash = 0;
+          for (let i = 0; i < gName.length; i++) {
+            hash = gName.charCodeAt(i) + ((hash << 5) - hash);
+          }
+          const hue = Math.abs(hash % 360);
+          
+          const groupDot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          groupDot.setAttribute("cx", startX + gIdx * dotSpacing);
+          groupDot.setAttribute("cy", dotY);
+          groupDot.setAttribute("r", dotRadius);
+          groupDot.setAttribute("fill", `hsla(${hue}, 70%, 40%, 1)`);
+          groupDot.setAttribute("stroke", "var(--paper)");
+          groupDot.setAttribute("stroke-width", "1");
+          
+          const dotTitle = document.createElementNS("http://www.w3.org/2000/svg", "title");
+          dotTitle.textContent = `Group: ${gName}`;
+          groupDot.appendChild(dotTitle);
+          
+          g.appendChild(groupDot);
+        });
+      }
+
       // Interactive Tooltip
       const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-      title.textContent = `[${node.type.toUpperCase()}] #${node.id}: ${node.title}\nLayer: ${node.layer}\nStatus: ${node.status.toUpperCase()}`;
+      title.textContent = `[${node.type.toUpperCase()}] #${node.id}: ${node.title}\nLayer: ${node.layer}\nStatus: ${node.status.toUpperCase()}\nGroups: ${(node.visualGroups || []).join(", ") || "None"}`;
       g.appendChild(title);
 
       nodeGroup.appendChild(g);
@@ -1601,6 +1822,9 @@
     plannerNodes.forEach(node => {
       detailsList += `### 📂 #${node.id}: ${node.title}\n`;
       detailsList += `*   **Subsystem Layer**: \`${node.layer}\` | **Language Target**: \`${node.binding.toUpperCase()}\` | **Status**: \`${node.status.toUpperCase()}\`\n`;
+      if ((node.visualGroups || []).length > 0) {
+        detailsList += `*   **Visual Groups**: ${node.visualGroups.map(g => `\`${g}\``).join(", ")}\n`;
+      }
       detailsList += `*   **Source Reference**: [View GitHub #${node.id}](${node.url})\n`;
       
       const allTasks = [...(node.parsedBodyTasks || []), ...(node.customTasks || [])];
@@ -1794,7 +2018,7 @@ ${detailsList}
     const active = plannerNodes.find(b => b.id === nodeId);
     document.getElementById("block-layer").value = active.layer;
     document.getElementById("block-status").value = active.status;
-    document.getElementById("block-visual-group").value = active.visualGroup || "";
+    document.getElementById("block-visual-group").value = (active.visualGroups || []).join(", ");
 
     // Check checkboxes for currently active dependencies (inherent and custom)
     const checkboxes = document.querySelectorAll('input[name="drawer-deps"]');
@@ -1821,6 +2045,7 @@ ${detailsList}
     const layerVal = document.getElementById("block-layer").value;
     const statusVal = document.getElementById("block-status").value;
     const visualGroupVal = document.getElementById("block-visual-group").value.trim();
+    const visualGroupsVal = visualGroupVal ? visualGroupVal.split(",").map(g => g.trim()).filter(g => g) : [];
 
     const selectedDeps = [];
     const ignoredDeps = [];
@@ -1848,11 +2073,11 @@ ${detailsList}
     if (plan) {
       if (!plan.metadata) plan.metadata = {};
       if (!plan.metadata[editingNodeId]) {
-        plan.metadata[editingNodeId] = { layer: "", status: "", customDependsOn: [], ignoredDependsOn: [], customTasks: [], taskStates: {}, visualGroup: null };
+        plan.metadata[editingNodeId] = { layer: "", status: "", customDependsOn: [], ignoredDependsOn: [], customTasks: [], taskStates: {}, visualGroups: [] };
       }
       plan.metadata[editingNodeId].layer = layerVal;
       plan.metadata[editingNodeId].status = statusVal;
-      plan.metadata[editingNodeId].visualGroup = visualGroupVal || null;
+      plan.metadata[editingNodeId].visualGroups = visualGroupsVal;
       plan.metadata[editingNodeId].customDependsOn = selectedDeps;
       plan.metadata[editingNodeId].ignoredDependsOn = ignoredDeps;
     }
