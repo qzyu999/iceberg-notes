@@ -690,6 +690,9 @@
         const ignoredDependsOn = overlay.ignoredDependsOn || [];
         const customTasks = overlay.customTasks || [];
         const taskStates = overlay.taskStates || {};
+        const docUrl = overlay.docUrl || "";
+        const docStatus = overlay.docStatus || "";
+        const docTldr = overlay.docTldr || "";
 
         // Parse markdown checklists directly from body text
         const parsedBodyTasks = parseChecklistFromMarkdown(item.body || "");
@@ -732,7 +735,10 @@
           ignoredDependsOn: ignoredDependsOn,
           customTasks: customTasks,
           parsedBodyTasks: parsedBodyTasks,
-          taskStates: taskStates
+          taskStates: taskStates,
+          docUrl: docUrl,
+          docStatus: docStatus,
+          docTldr: docTldr
         };
       });
   }
@@ -997,6 +1003,37 @@
         </div>
       </div>
 
+      <!-- Section: Design Document & RFC Link -->
+      <div style="margin-top: 18px; border-top: 1.5px solid var(--g200); padding-top: 14px;">
+        <div class="nav-category" style="border-bottom: none; margin-bottom: 6px; font-size: 11px; font-weight: bold; letter-spacing: 0.05em; color: var(--clay);">
+          📄 Design Document &amp; RFC Link
+        </div>
+        <div class="arch-task-card" style="background: var(--paper); display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;">
+          <div style="display: flex; gap: 8px; align-items: center; width: 100%;">
+            <input type="url" class="matrix-search-input" style="height: 32px; flex: 1; font-size: 12px;" placeholder="Paste Google Doc URL here..." value="${active.docUrl || ''}" onchange="saveNodeDocUrl('${active.id}', this.value)">
+            ${active.docUrl ? `
+              <a href="${active.docUrl}" target="_blank" class="btn btn-clay" style="height: 32px; padding: 0 10px; font-size: 11px; line-height: 28px; display: inline-flex; align-items: center; text-decoration: none;" title="Open Google Doc in a new tab">
+                Open ↗
+              </a>
+            ` : ''}
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <span style="font-size: 11.5px; font-weight: bold; color: var(--g600);">Doc Status:</span>
+            <select class="matrix-filter-select" style="height: 28px; font-size: 11px; font-weight: bold; width: 120px; border-color: var(--clay); color: var(--clay);" onchange="saveNodeDocStatus('${active.id}', this.value)">
+              <option value="" ${!active.docStatus ? 'selected' : ''}>None</option>
+              <option value="drafting" ${active.docStatus === 'drafting' ? 'selected' : ''}>📝 Drafting</option>
+              <option value="in-review" ${active.docStatus === 'in-review' ? 'selected' : ''}>👀 In Review</option>
+              <option value="approved" ${active.docStatus === 'approved' ? 'selected' : ''}>🟢 Approved</option>
+              <option value="retired" ${active.docStatus === 'retired' ? 'selected' : ''}>⚠️ Retired</option>
+            </select>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <span style="font-size: 11.5px; font-weight: bold; color: var(--g600);">TL;DR Design Summary:</span>
+            <textarea class="matrix-search-input" style="height: 60px; font-size: 12px; font-family: var(--serif); resize: vertical; padding: 6px; line-height: 1.4;" placeholder="Describe key design objectives or summary of this proposal..." onchange="saveNodeDocTldr('${active.id}', this.value)">${active.docTldr || ''}</textarea>
+          </div>
+        </div>
+      </div>
+
       <!-- Directed Dependency Flow Lane -->
       <div style="margin-top: 18px; border-top: 1.5px solid var(--g200); padding-top: 14px;">
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
@@ -1071,6 +1108,47 @@
     const activeRow = document.querySelector("#arch-list-body .active-row");
     if (activeRow) {
       activeRow.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }
+
+  async function saveNodeDocUrl(nodeId, url) {
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan) {
+      if (!plan.metadata) plan.metadata = {};
+      if (!plan.metadata[nodeId]) {
+        plan.metadata[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+      }
+      plan.metadata[nodeId].docUrl = url;
+      await savePlannerOverlay();
+      renderDetailPanel();
+    }
+  }
+
+  async function saveNodeDocStatus(nodeId, status) {
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan) {
+      if (!plan.metadata) plan.metadata = {};
+      if (!plan.metadata[nodeId]) {
+        plan.metadata[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+      }
+      plan.metadata[nodeId].docStatus = status;
+      await savePlannerOverlay();
+      renderDetailPanel();
+    }
+  }
+
+  async function saveNodeDocTldr(nodeId, tldr) {
+    const activeId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activeId];
+    if (plan) {
+      if (!plan.metadata) plan.metadata = {};
+      if (!plan.metadata[nodeId]) {
+        plan.metadata[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+      }
+      plan.metadata[nodeId].docTldr = tldr;
+      await savePlannerOverlay();
     }
   }
 

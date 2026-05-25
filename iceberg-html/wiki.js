@@ -431,7 +431,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         { name: "Feature Parity Matrix", path: "feature-matrix.html" },
         { name: "Architectural DAG Builder", path: "arch-planner.html" },
         { name: "Triage & Review Board", path: "triage-board.html" },
-        { name: "Implementation Plans", path: "implementation-plans.html" }
+        { name: "Implementation Plans", path: "implementation-plans.html" },
+        { name: "Design & RFC Hub", path: "design-docs.html" }
       ]
     },
     {

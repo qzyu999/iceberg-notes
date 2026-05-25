@@ -1,0 +1,859 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design Documents &amp; RFC Hub — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<script src="wiki.js" defer></script>
+<style>
+  /* Premium Design Docs Hub Layout */
+  .page-head {
+    margin-bottom: 32px;
+    max-width: 820px;
+  }
+  
+  .prompt-box {
+    background: var(--g100);
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    padding: 16px 20px;
+    font-size: 13.5px;
+    color: var(--g700);
+    margin-top: 16px;
+    line-height: 1.5;
+  }
+  
+  .prompt-box .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--g500);
+    display: block;
+    margin-bottom: 6px;
+    font-weight: bold;
+  }
+
+  /* Split layout */
+  .doc-hub-layout {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 40px;
+    margin-top: 24px;
+  }
+  @media (max-width: 900px) {
+    .doc-hub-layout { grid-template-columns: 1fr; }
+  }
+
+  /* Sticky Navigation of documents */
+  .doc-nav-card {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: 0 4px 12px rgba(20,20,19,0.01);
+  }
+  .doc-nav-card .nav-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--g500);
+    margin-bottom: 12px;
+    font-weight: bold;
+  }
+  .doc-nav-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .doc-nav-item {
+    font-size: 13px;
+    color: var(--g700);
+    text-decoration: none;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border-left: 2.5px solid transparent;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+  }
+  .doc-nav-item:hover {
+    background: var(--g100);
+    color: var(--slate);
+    border-left-color: var(--g400);
+  }
+  .doc-nav-item.active {
+    background: var(--clay-l);
+    color: var(--clay);
+    font-weight: bold;
+    border-left-color: var(--clay);
+  }
+
+  /* Document Cards list */
+  .doc-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+  
+  .doc-card {
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-radius: 14px;
+    padding: 28px;
+    box-shadow: 0 4px 16px rgba(20,20,19,0.01);
+    position: relative;
+    scroll-margin-top: 24px;
+  }
+
+  .doc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1.5px solid var(--g200);
+    padding-bottom: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  
+  .doc-title-sec h2 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 24px;
+    color: var(--slate);
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .doc-meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--g500);
+    font-weight: bold;
+  }
+
+  /* Progress Roadmap timeline tracker */
+  .status-track {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 18px 0;
+    position: relative;
+    max-width: 600px;
+  }
+  .status-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    flex: 1;
+    z-index: 1;
+  }
+  .status-dot {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--paper);
+    border: 3px solid var(--g300);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: bold;
+    color: var(--g500);
+    transition: all 0.25s ease;
+  }
+  .status-step.active .status-dot {
+    border-color: var(--clay);
+    background: var(--clay-l);
+    color: var(--clay);
+    box-shadow: 0 0 8px rgba(217,119,87,0.3);
+  }
+  .status-step.complete .status-dot {
+    border-color: var(--olive);
+    background: var(--olive);
+    color: var(--paper);
+  }
+  .status-label {
+    font-size: 10px;
+    font-weight: bold;
+    color: var(--g500);
+    margin-top: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .status-step.active .status-label { color: var(--clay); }
+  .status-step.complete .status-label { color: var(--olive); }
+  
+  .status-line {
+    position: absolute;
+    top: 11px;
+    left: 10%;
+    right: 10%;
+    height: 3px;
+    background: var(--g200);
+    z-index: 0;
+  }
+  .status-line-fill {
+    height: 100%;
+    background: var(--olive);
+    width: 0%;
+    transition: width 0.3s ease;
+  }
+
+  /* TLDR Feature summary matching 14-explainer */
+  .doc-tldr {
+    border: 1.5px solid var(--g300);
+    border-left: 3.5px solid var(--clay);
+    border-radius: 10px;
+    background: var(--ivory);
+    padding: 16px 20px;
+    font-size: 14.5px;
+    line-height: 1.55;
+    color: var(--g700);
+    margin: 20px 0;
+  }
+  .doc-tldr b { color: var(--slate); }
+
+  /* Premium interactive tabs for details section */
+  .tabs {
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    background: var(--paper);
+    margin: 24px 0 16px;
+    overflow: hidden;
+  }
+  .tabbar {
+    display: flex;
+    border-bottom: 1.5px solid var(--g300);
+    background: var(--g100);
+  }
+  .tabbar button {
+    appearance: none;
+    border: none;
+    background: none;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--g500);
+    padding: 10px 18px;
+    cursor: pointer;
+    border-right: 1.5px solid var(--g300);
+    font-weight: bold;
+    transition: all 0.15s ease;
+  }
+  .tabbar button:hover {
+    color: var(--slate);
+    background: rgba(20,20,19,0.02);
+  }
+  .tabbar button.active {
+    background: var(--paper);
+    color: var(--slate);
+    border-bottom: 2.5px solid var(--clay);
+    margin-bottom: -1px;
+  }
+  .tab-pane {
+    display: none;
+    padding: 20px;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--g700);
+  }
+  .tab-pane.active {
+    display: block;
+  }
+  
+  .tab-pane pre {
+    background: var(--ivory);
+    border: 1.5px solid var(--g300);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-family: var(--mono);
+    font-size: 12px;
+    overflow-x: auto;
+    color: var(--slate);
+    margin-top: 10px;
+  }
+
+  /* Inline editing modal or form inside wiki */
+  .wiki-editor-card {
+    background: var(--paper);
+    border: 1.5px dashed var(--clay);
+    border-radius: 12px;
+    padding: 20px;
+    margin-top: 24px;
+  }
+</style>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header class="page-head">
+      <div class="eyebrow" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>RFC Registry &amp; Learning Hub · Iceberg Cookbook</span>
+        <button class="btn btn-clay" id="btn-toggle-editor" style="font-size: 11px; padding: 2px 10px; height: 26px;" onclick="toggleDocEditorPanel()">
+          ✏️ Edit Design Document metadata
+        </button>
+      </div>
+      <h1 id="hub-title-display">Design Documents &amp; RFC Hub</h1>
+      
+      <div style="display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap;">
+        <span style="font-size: 11px; font-weight: 800; color: var(--slate); font-family: var(--sans); letter-spacing: 0.05em;">ACTIVE ROADMAP:</span>
+        <select id="select-active-plan" class="matrix-filter-select" style="border-color: var(--clay); color: var(--clay); font-weight: 600; min-width: 180px; height: 32px;" onchange="switchActivePlan(this.value)">
+          <!-- Dynamically populated -->
+        </select>
+        
+        <span style="font-size: 11px; font-weight: 800; color: var(--slate); font-family: var(--sans); letter-spacing: 0.05em; margin-left: 12px;">DOC STATUS:</span>
+        <select id="filter-doc-status" class="matrix-filter-select" style="height: 32px;" onchange="renderDocHub()">
+          <option value="ALL">All Writeups</option>
+          <option value="drafting">📝 Drafting</option>
+          <option value="in-review">👀 In Review</option>
+          <option value="approved">🟢 Approved</option>
+          <option value="LINKED">🔗 Has Google Doc Linked</option>
+        </select>
+      </div>
+
+      <div class="prompt-box">
+        <span class="label">RFC &amp; Deep-Dive Writeups</span>
+        This dynamic hub serves as the centralized directory for all Iceberg technical explainers, design documents, and Google Doc proposals. Items edit and synchronize live with your visual architecture planner maps.
+      </div>
+    </header>
+
+    <!-- Interactive Workspace Grid -->
+    <div class="doc-hub-layout">
+      
+      <!-- Left side: sticky nav table of contents -->
+      <div class="doc-nav-col">
+        <div class="doc-nav-card">
+          <div class="nav-title">Documents Directory</div>
+          <div class="doc-nav-list" id="doc-nav-element">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Right side: deep dive cards -->
+      <div class="doc-cards-col">
+        
+        <!-- Interactive metadata editor (Hidden by default) -->
+        <div class="wiki-editor-card" id="doc-metadata-editor-element" style="display: none; margin-bottom: 32px;">
+          <div style="font-size: 11px; font-weight: bold; color: var(--clay); font-family: var(--sans); margin-bottom: 12px; letter-spacing: 0.05em; text-transform: uppercase;">
+            🛠️ Design Document Wiki Editor
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px;">
+            <div>
+              <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">Choose Component Node:</label>
+              <select id="editor-select-node" class="matrix-filter-select" style="width: 100%; border-color: var(--clay); height: 32px;" onchange="populateEditorNodeFields(this.value)">
+                <!-- Dynamically populated -->
+              </select>
+            </div>
+            <div>
+              <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">Review/RFC Status:</label>
+              <select id="editor-doc-status" class="matrix-filter-select" style="width: 100%; height: 32px;">
+                <option value="">None / Not Registered</option>
+                <option value="drafting">📝 Drafting</option>
+                <option value="in-review">👀 In Review</option>
+                <option value="approved">🟢 Approved (Ready to Code)</option>
+              </select>
+            </div>
+          </div>
+          
+          <div style="margin-bottom: 12px;">
+            <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">Google Doc URL:</label>
+            <input type="url" id="editor-doc-url" class="matrix-search-input" style="height: 32px;" placeholder="https://docs.google.com/document/d/...">
+          </div>
+          
+          <div style="margin-bottom: 12px;">
+            <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">TL;DR Design Summary (HTML/Markdown):</label>
+            <textarea id="editor-doc-tldr" class="matrix-search-input" style="height: 64px; font-family: var(--serif); resize: vertical; padding: 8px; line-height: 1.45;" placeholder="Provide a brief TL;DR summary explaining what this architectural proposal solves..."></textarea>
+          </div>
+
+          <div style="margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div>
+              <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">Key Design Notes / Gotchas (One per line):</label>
+              <textarea id="editor-doc-notes" class="matrix-search-input" style="height: 60px; font-family: var(--sans); font-size: 12.5px; resize: vertical; padding: 6px;" placeholder="List key gotchas or implementation details..."></textarea>
+            </div>
+            <div>
+              <label style="font-size: 11.5px; font-weight: bold; color: var(--g600); display: block; margin-bottom: 4px;">Proposed Code/API Snippet (Codeblock):</label>
+              <textarea id="editor-doc-snippet" class="matrix-search-input" style="height: 60px; font-family: var(--mono); font-size: 11px; resize: vertical; padding: 6px;" placeholder="// code snippet stubs..."></textarea>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button class="btn" style="border-color: var(--slate); font-size: 11.5px; padding: 4px 14px; background: transparent;" onclick="toggleDocEditorPanel()">Cancel</button>
+            <button class="btn btn-clay" style="font-size: 11.5px; padding: 4px 16px;" onclick="saveEditorMetadata()">💾 Save Explainer &amp; Sync File</button>
+          </div>
+        </div>
+
+        <!-- Rendered Deep Dive Explainer Cards -->
+        <div class="doc-cards" id="doc-cards-container">
+          <!-- Dynamically populated -->
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+</div>
+
+<script>
+  // ── State Databases ──
+  let ghDatabase = [];      // Loaded collection
+  let archDatabase = {};    // Loaded overlays
+  let planNodes = [];       // Active nodes list
+
+  const STATUS_LABELS = {
+    "drafting": "Drafting",
+    "in-review": "In Review",
+    "approved": "Approved",
+    "complete": "Merged"
+  };
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    window.addEventListener("wiki-sync-status-changed", async () => {
+      await loadPlanData();
+    });
+    await loadPlanData();
+  });
+
+  async function loadPlanData() {
+    // 1. Load collection
+    let loadedGH = null;
+    if (window.wikiDirHandle) {
+      loadedGH = await window.readWikiFile("wiki-github-collection.json");
+    }
+    if (!loadedGH) {
+      const cached = localStorage.getItem("wiki-github-collection");
+      if (cached) loadedGH = JSON.parse(cached);
+    }
+    ghDatabase = (loadedGH && loadedGH.length > 0) ? loadedGH : [];
+
+    // 2. Load overlays
+    let loadedArch = null;
+    if (window.wikiDirHandle) {
+      loadedArch = await window.readWikiFile("wiki-architecture.json");
+    }
+    if (!loadedArch) {
+      const cached = localStorage.getItem("wiki-architecture-state");
+      if (cached) loadedArch = JSON.parse(cached);
+    }
+    archDatabase = loadedArch || {};
+
+    // 3. Align Databases
+    alignDatabases();
+
+    // 4. Populate plan switcher
+    populatePlanSwitcher();
+
+    // 5. Render
+    renderDocHub();
+  }
+
+  function alignDatabases() {
+    if (!archDatabase || typeof archDatabase !== "object" || Array.isArray(archDatabase) || !archDatabase.savedPlans) {
+      archDatabase = { savedPlans: {}, activePlanId: "" };
+    }
+    if (!archDatabase.activePlanId || !archDatabase.savedPlans[archDatabase.activePlanId]) {
+      const keys = Object.keys(archDatabase.savedPlans);
+      if (keys.length > 0) {
+        archDatabase.activePlanId = keys[0];
+      }
+    }
+  }
+
+  function populatePlanSwitcher() {
+    const select = document.getElementById("select-active-plan");
+    if (!select) return;
+    select.innerHTML = "";
+    Object.keys(archDatabase.savedPlans).forEach(pid => {
+      const p = archDatabase.savedPlans[pid];
+      select.innerHTML += `<option value="${pid}" ${pid === archDatabase.activePlanId ? 'selected' : ''}>${p.name}</option>`;
+    });
+  }
+
+  async function switchActivePlan(planId) {
+    archDatabase.activePlanId = planId;
+    localStorage.setItem("wiki-architecture-state", JSON.stringify(archDatabase));
+    if (window.wikiDirHandle) {
+      await window.writeWikiFile("wiki-architecture.json", archDatabase);
+    }
+    renderDocHub();
+  }
+
+  function compilePlanNodes() {
+    const activePlan = archDatabase.savedPlans[archDatabase.activePlanId] || { name: "Full Collection Roadmap", nodes: [], metadata: {} };
+    const nodesInPlan = activePlan.nodes || [];
+    const metadataMap = activePlan.metadata || {};
+
+    planNodes = ghDatabase
+      .filter(item => nodesInPlan.includes(item.number))
+      .map(item => {
+        const overlay = metadataMap[item.number] || {};
+        
+        let defaultLayer = "Catalog Operations";
+        const descText = `${item.title} ${item.body || ""}`.toLowerCase();
+        if (descText.includes("planning") || descText.includes("scan") || descText.includes("projection")) {
+          defaultLayer = "Planning & Scans";
+        } else if (descText.includes("delete") || descText.includes("row-level") || descText.includes("mor") || descText.includes("cow")) {
+          defaultLayer = "Row-Level Ops";
+        }
+
+        const layer = overlay.layer || defaultLayer;
+        const status = overlay.status || (item.state === "merged" || item.state === "closed" ? "complete" : "planned");
+
+        // Google Doc variables
+        const docUrl = overlay.docUrl || "";
+        const docStatus = overlay.docStatus || (docUrl ? "drafting" : "");
+        const docTldr = overlay.docTldr || "";
+        const docNotes = overlay.docNotes || [];
+        const docSnippet = overlay.docSnippet || "";
+
+        return {
+          id: item.number,
+          title: item.title,
+          type: item.type || "issue",
+          author: item.author || "iceberg-dev",
+          binding: item.binding || "core",
+          url: item.url,
+          layer: layer,
+          status: status,
+          dependsOn: (item.outgoing || []).filter(depId => nodesInPlan.includes(depId)),
+          docUrl: docUrl,
+          docStatus: docStatus,
+          docTldr: docTldr,
+          docNotes: docNotes,
+          docSnippet: docSnippet
+        };
+      });
+  }
+
+  function renderDocHub() {
+    compilePlanNodes();
+    
+    const navContainer = document.getElementById("doc-nav-element");
+    const cardsContainer = document.getElementById("doc-cards-container");
+    const statusFilter = document.getElementById("filter-doc-status").value;
+
+    navContainer.innerHTML = "";
+    cardsContainer.innerHTML = "";
+
+    // Filter plan nodes that have doc features or fit search criteria
+    const filteredNodes = planNodes.filter(node => {
+      if (statusFilter === "ALL") return true;
+      if (statusFilter === "LINKED") return node.docUrl !== "";
+      return node.docStatus === statusFilter;
+    });
+
+    // Populate dynamic metadata editor options
+    const editorSelect = document.getElementById("editor-select-node");
+    if (editorSelect) {
+      editorSelect.innerHTML = planNodes.map(n => `<option value="${n.id}">#${n.id}: ${n.title.substring(0, 45)}...</option>`).join("");
+      populateEditorNodeFields(editorSelect.value);
+    }
+
+    if (filteredNodes.length === 0) {
+      navContainer.innerHTML = `<span style="font-size: 11px; color: var(--g500); font-style: italic; padding: 6px 10px;">No writeups found</span>`;
+      cardsContainer.innerHTML = `
+        <div class="doc-card" style="text-align: center; padding: 48px; color: var(--g500); font-style: italic;">
+          <h3>No Technical Explainers Match the Filter Criteria</h3>
+          <p style="margin-top: 10px; font-size: 13.5px;">Click the "Edit Design Document metadata" button in the upper-right corner to link Google Docs or draft writeup details directly on this page!</p>
+        </div>
+      `;
+      return;
+    }
+
+    filteredNodes.forEach((node, idx) => {
+      // Sidebar Navigation Menu Link
+      navContainer.innerHTML += `
+        <a href="#doc-section-${node.id}" class="doc-nav-item" id="nav-link-${node.id}" onclick="highlightNav('${node.id}')">
+          <span style="font-family: var(--mono); font-weight: bold; color: var(--clay); font-size: 11px;">#${node.id}</span>
+          ${node.title}
+        </a>
+      `;
+
+      // HSL color hash for language tag
+      let hash = 0;
+      for (let i = 0; i < node.binding.length; i++) {
+        hash = node.binding.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const hue = Math.abs(hash % 360);
+
+      // Determine progress bar percent based on doc/rfc review stages
+      let progressPercent = 0;
+      let step1 = "", step2 = "", step3 = "", step4 = "";
+      
+      if (node.docStatus === "drafting") {
+        progressPercent = 15;
+        step1 = "active";
+      } else if (node.docStatus === "in-review") {
+        progressPercent = 50;
+        step1 = "complete";
+        step2 = "active";
+      } else if (node.docStatus === "approved") {
+        progressPercent = 85;
+        step1 = "complete";
+        step2 = "complete";
+        step3 = "active";
+      }
+      if (node.status === "complete") {
+        progressPercent = 100;
+        step1 = "complete";
+        step2 = "complete";
+        step3 = "complete";
+        step4 = "complete";
+      }
+
+      // Compile design gotchas / notes list
+      let gotchasHTML = "";
+      if (node.docNotes && node.docNotes.length > 0) {
+        gotchasHTML = node.docNotes.map(note => `<li style="margin-bottom: 6px; font-size: 13px;">${note}</li>`).join("");
+      } else {
+        gotchasHTML = `
+          <li style="margin-bottom: 6px; font-size: 13px; color: var(--g500); font-style: italic;">No specific gotchas listed yet. Add architectural flags to prevent backward compatibility issues.</li>
+        `;
+      }
+
+      // Compile dynamic explainer card matching Acme 14-explainer structure
+      cardsContainer.innerHTML += `
+        <div class="doc-card" id="doc-section-${node.id}">
+          <div class="doc-header">
+            <div class="doc-title-sec">
+              <div class="eyebrow" style="margin-bottom: 2px;">RFC Proposal Summary · #${node.id}</div>
+              <h2>${node.title}</h2>
+              <div class="doc-meta">
+                Subsystem: <span style="background: hsla(${hue}, 60%, 40%, 0.1); border: 1px solid hsla(${hue}, 60%, 40%, 0.2); color: hsla(${hue}, 70%, 30%, 1); padding: 1.5px 5px; border-radius: 4px; font-size: 10px;">${node.binding.toUpperCase()}</span>
+                &nbsp;|&nbsp; Layer: <span>${node.layer}</span>
+                &nbsp;|&nbsp; Author: @${node.author}
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              ${node.docUrl ? `
+                <a href="${node.docUrl}" target="_blank" class="btn btn-clay" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; height: 32px; padding: 0 12px; font-weight: bold;">
+                  <span>📄 Open Google Doc Writeup</span> ↗
+                </a>
+              ` : `
+                <button class="btn" style="border-color: var(--g300); font-size: 11px; height: 32px; padding: 0 10px; background: transparent; color: var(--g500);" onclick="openEditorForNode('${node.id}')">
+                  🔗 Link Google Doc
+                </button>
+              `}
+              <button class="btn" style="border-color: var(--slate); font-size: 11px; height: 32px; padding: 0 10px; background: transparent;" onclick="copyRFCProposalMarkdown('${node.id}')" title="Copy clean Markdown proposal to clipboard">
+                📋 Copy RFC Proposal
+              </button>
+            </div>
+          </div>
+
+          <!-- Document Review Progression Tracks -->
+          <div style="font-size: 11.5px; font-weight: bold; color: var(--g600); margin-bottom: 6px; font-family: var(--sans); letter-spacing: 0.02em;">RFC PROGRESSION TRACK:</div>
+          <div class="status-track">
+            <div class="status-line"><div class="status-line-fill" style="width: ${progressPercent}%;"></div></div>
+            <div class="status-step ${step1}">
+              <div class="status-dot">📝</div>
+              <div class="status-label">Drafting</div>
+            </div>
+            <div class="status-step ${step2}">
+              <div class="status-dot">👀</div>
+              <div class="status-label">In Review</div>
+            </div>
+            <div class="status-step ${step3}">
+              <div class="status-dot">🟢</div>
+              <div class="status-label">Approved</div>
+            </div>
+            <div class="status-step ${step4}">
+              <div class="status-dot">🏁</div>
+              <div class="status-label">Merged</div>
+            </div>
+          </div>
+
+          <!-- TLDR Explainer Section -->
+          <div class="doc-tldr">
+            <b>TL;DR</b> — ${node.docTldr ? node.docTldr : `<em>No TL;DR summary provided yet. Linking a Google Doc or writing architectural summaries here establishes clear development tracks for other binding engines.</em>`}
+          </div>
+
+          <!-- Interactive Tabbed Subpanels (Details, Snippet, Prerequisites) -->
+          <div class="tabs">
+            <div class="tabbar">
+              <button class="active" onclick="switchSubPanelTab(this, 'pane-details-${node.id}')">Gotchas &amp; Learning</button>
+              <button onclick="switchSubPanelTab(this, 'pane-snippet-${node.id}')">Proposed API / Schema</button>
+              <button onclick="switchSubPanelTab(this, 'pane-dependencies-${node.id}')">Directed Prerequisites</button>
+            </div>
+            
+            <!-- Tab 1: Gotchas -->
+            <div class="tab-pane active" id="pane-details-${node.id}">
+              <div style="font-weight: bold; color: var(--slate); font-size: 14px; margin-bottom: 10px;">Gotchas Worth Knowing:</div>
+              <ul style="padding-left: 20px;">
+                ${gotchasHTML}
+              </ul>
+            </div>
+
+            <!-- Tab 2: Proposed API -->
+            <div class="tab-pane" id="pane-snippet-${node.id}">
+              <div style="font-weight: bold; color: var(--slate); font-size: 14px; margin-bottom: 6px;">API Struct Spec / Route Configuration:</div>
+              ${node.docSnippet ? `
+                <pre><code>${escapeHTML(node.docSnippet)}</code></pre>
+              ` : `
+                <div style="font-size: 12.5px; color: var(--g500); font-style: italic; padding: 10px 0;">No API code snippets proposed yet. Click edit metadata above to paste code specifications!</div>
+              `}
+            </div>
+
+            <!-- Tab 3: Prerequisites -->
+            <div class="tab-pane" id="pane-dependencies-${node.id}">
+              <div style="font-weight: bold; color: var(--slate); font-size: 14px; margin-bottom: 10px;">Topological Upstream Prerequisites:</div>
+              <div style="display: flex; flex-direction: column; gap: 8px; max-width: 600px;">
+                ${node.dependsOn.length > 0 ? 
+                  node.dependsOn.map(depId => {
+                    const depNode = planNodes.find(n => n.id === depId);
+                    if (!depNode) return "";
+                    return `
+                      <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; border: 1.5px solid var(--g200); background: var(--ivory); font-size: 12.5px;">
+                        <span><strong style="color: var(--clay);">#${depId}</strong>: ${depNode.title}</span>
+                        <span class="badge-status ${depNode.status}" style="font-size: 9px; padding: 2px 6px;">${depNode.status}</span>
+                      </div>
+                    `;
+                  }).join("")
+                  : `<span style="font-size: 12.5px; color: var(--g500); font-style: italic;">No upstream prerequisite stubs registered. This feature can be implemented independently.</span>`
+                }
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  function highlightNav(nodeId) {
+    document.querySelectorAll(".doc-nav-item").forEach(item => item.classList.remove("active"));
+    const activeLink = document.getElementById(`nav-link-${nodeId}`);
+    if (activeLink) activeLink.classList.add("active");
+  }
+
+  function switchSubPanelTab(button, paneId) {
+    const parentTabbar = button.parentElement;
+    const parentTabsCard = parentTabbar.parentElement;
+    
+    parentTabbar.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+    parentTabsCard.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
+    
+    button.classList.add("active");
+    const activePane = document.getElementById(paneId);
+    if (activePane) activePane.classList.add("active");
+  }
+
+  function toggleDocEditorPanel() {
+    const panel = document.getElementById("doc-metadata-editor-element");
+    const isShowing = panel.style.display === "block";
+    panel.style.display = isShowing ? "none" : "block";
+  }
+
+  function openEditorForNode(nodeId) {
+    toggleDocEditorPanel();
+    const selector = document.getElementById("editor-select-node");
+    if (selector) {
+      selector.value = nodeId;
+      populateEditorNodeFields(nodeId);
+    }
+  }
+
+  function populateEditorNodeFields(nodeId) {
+    const activePlan = archDatabase.savedPlans[archDatabase.activePlanId];
+    if (!activePlan || !activePlan.metadata) return;
+    const meta = activePlan.metadata[nodeId] || {};
+
+    document.getElementById("editor-doc-url").value = meta.docUrl || "";
+    document.getElementById("editor-doc-status").value = meta.docStatus || "";
+    document.getElementById("editor-doc-tldr").value = meta.docTldr || "";
+    document.getElementById("editor-doc-notes").value = (meta.docNotes || []).join("\n");
+    document.getElementById("editor-doc-snippet").value = meta.docSnippet || "";
+  }
+
+  async function saveEditorMetadata() {
+    const nodeId = document.getElementById("editor-select-node").value;
+    const activePlanId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activePlanId];
+    
+    if (plan) {
+      if (!plan.metadata) plan.metadata = {};
+      if (!plan.metadata[nodeId]) {
+        plan.metadata[nodeId] = { layer: "", status: "", customDependsOn: [], customTasks: [], taskStates: {} };
+      }
+      
+      plan.metadata[nodeId].docUrl = document.getElementById("editor-doc-url").value.trim();
+      plan.metadata[nodeId].docStatus = document.getElementById("editor-doc-status").value;
+      plan.metadata[nodeId].docTldr = document.getElementById("editor-doc-tldr").value.trim();
+      
+      const rawNotes = document.getElementById("editor-doc-notes").value.split("\n");
+      plan.metadata[nodeId].docNotes = rawNotes.map(n => n.trim()).filter(n => n.length > 0);
+      plan.metadata[nodeId].docSnippet = document.getElementById("editor-doc-snippet").value.trim();
+
+      // Enforce direct sync to filesystem
+      localStorage.setItem("wiki-architecture-state", JSON.stringify(archDatabase));
+      if (window.wikiDirHandle) {
+        await window.writeWikiFile("wiki-architecture.json", archDatabase);
+      }
+      
+      // Close panel and refresh
+      toggleDocEditorPanel();
+      renderDocHub();
+    }
+  }
+
+  function copyRFCProposalMarkdown(nodeId) {
+    const node = planNodes.find(n => n.id === nodeId);
+    if (!node) return;
+
+    let md = [];
+    md.push(`# RFC: ${node.title}`);
+    md.push(`*PR/Issue Reference: #${node.id} | Binding: ${node.binding.toUpperCase()} | Layer: ${node.layer}*`);
+    md.push("");
+    md.push(`## 📌 TL;DR Feature Explainer`);
+    md.push(node.docTldr ? node.docTldr : "No TL;DR design proposal written yet.");
+    md.push("");
+    
+    if (node.docNotes && node.docNotes.length > 0) {
+      md.push(`## ⚠️ Gotchas &amp; Learning Constraints`);
+      node.docNotes.forEach(note => {
+        md.push(`*   ${note}`);
+      });
+      md.push("");
+    }
+
+    if (node.docSnippet) {
+      md.push(`## 💻 Proposed API Struct &amp; Config`);
+      md.push("```typescript");
+      md.push(node.docSnippet);
+      md.push("```");
+      md.push("");
+    }
+
+    if (node.docUrl) {
+      md.push(`## 📄 Collaborative Writing Reference`);
+      md.push(`Thorough writeup and design reviews are detailed in the [Google Document](${node.docUrl}).`);
+    }
+
+    const text = md.join("\n");
+    navigator.clipboard.writeText(text).then(() => {
+      alert(`Successfully copied RFC proposal for #${node.id} to clipboard!`);
+    }).catch(err => {
+      alert("Failed to copy. Please extract content manually.");
+    });
+  }
+
+  function escapeHTML(str) {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+</script>
+</body>
+</html>
