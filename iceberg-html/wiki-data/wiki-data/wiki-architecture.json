@@ -2,6 +2,35 @@
   "savedPlans": {
     "full-collection": {
       "name": "Full Collection Roadmap",
+      "risks": [
+        {
+          "risk": "<strong>TableMetadata Concurrency:</strong> Parallel commits conflict during rest metastore swaps.",
+          "sev": "HIGH",
+          "mitigation": "Utilize optimistic retry policies and enforce transaction stubs with clean snapshot-isolation rollback boundaries."
+        },
+        {
+          "risk": "<strong>Serialization Breakages:</strong> Introducing properties or spec version gating breaks minor engine API schemas.",
+          "sev": "MED",
+          "mitigation": "Enforce custom kebab-case parsers (e.g. <code>TableMetadataParser</code>) without using Jackson annotations; register revapi track gates."
+        },
+        {
+          "risk": "<strong>Resource Leaks:</strong> Large manifest-group iterations mask I/O leaks in streaming pipelines.",
+          "sev": "LOW",
+          "mitigation": "Always wrap closeable collections in D3-like custom <code>try-with-resources</code> stubs using Iceberg's <code>CloseableIterable</code> wrappers."
+        }
+      ],
+      "openQuestions": [
+        {
+          "question": "Do we allow editing deletes, or only soft deletes?",
+          "details": "Soft deletes are simpler to persist in V2 format lists, whereas complete rewrites during compaction require sequence number gating.",
+          "owner": "Decide with · Community Consensus, before Milestone 3"
+        },
+        {
+          "question": "Vectorized offset cache sizes inside pyiceberg",
+          "details": "Setting negative limits disables caching. We should confirm standard memory bounds across all client catalogs to avoid memory leakage.",
+          "owner": "Decide with · binding maintainers, before Milestone 4"
+        }
+      ],
       "nodes": [
         "2193",
         "3364",
@@ -198,6 +227,35 @@
     },
     "plan-1779509761391": {
       "name": "PyIceberg Maintenance",
+      "risks": [
+        {
+          "risk": "<strong>Orphan File Cleanup Risk:</strong> Remove orphan files utility might delete newly added concurrent files before commit completes.",
+          "sev": "HIGH",
+          "mitigation": "Validate file timestamps against a grace period (e.g., older than 24 hours) and cross-reference with active manifest lists before physical file purging."
+        },
+        {
+          "risk": "<strong>Catalog Lock Availability:</strong> Lack of distributed transactions in standard file systems causing corrupt metadata swap states.",
+          "sev": "MED",
+          "mitigation": "Implement catalog-specific locking mechanisms (like S3 conditional writes or DynamoDB locks) for metadata swapping."
+        },
+        {
+          "risk": "<strong>High Memory Overhead during Orphan Scans:</strong> Scanning millions of files in large catalogs raises OOM crashes.",
+          "sev": "MED",
+          "mitigation": "Leverage streaming directory iterators and perform in-memory filter checks using space-efficient Bloom filters or partitioned hash sets."
+        }
+      ],
+      "openQuestions": [
+        {
+          "question": "Should we provide an interactive CLI review step?",
+          "details": "Deleting files is destructive. Providing a preview option showing dry-run output prevents catastrophic human error.",
+          "owner": "Decide with · Maintainer Review, before Milestone 3"
+        },
+        {
+          "question": "Support AWS S3 inventory scans instead of direct listing?",
+          "details": "S3 direct directory listing is extremely slow and expensive for massive tables. Inventory files would scale beautifully.",
+          "owner": "Decide with · AWS Catalog Parity, before Milestone 4"
+        }
+      ],
       "nodes": [
         "3320",
         "3131",
@@ -308,6 +366,35 @@
     },
     "plan-1779594189720": {
       "name": "PyIceberg MoR",
+      "risks": [
+        {
+          "risk": "<strong>Delete Filter Latency in Scans:</strong> Applying position deletes on-the-fly inside table scan iterators drastically degrades throughput.",
+          "sev": "HIGH",
+          "mitigation": "Load position delete bitmaps once per manifest group and run vectorized binary search filtering on PyArrow RecordBatch columns."
+        },
+        {
+          "risk": "<strong>Roaring Bitmap Memory Explosion:</strong> Large position delete bitmaps consume excessive heap memory.",
+          "sev": "MED",
+          "mitigation": "Implement segment-level RoaringPositionBitmap lazy-loading, serializing chunks to direct binary buffers rather than mapping python integers."
+        },
+        {
+          "risk": "<strong>Equality Delete Evaluation:</strong> Dynamically matching row values across custom partition bounds is CPU intensive.",
+          "sev": "HIGH",
+          "mitigation": "Restrict equality deletes to specific primary key columns and pre-compile projection index maps inside the scan planner."
+        }
+      ],
+      "openQuestions": [
+        {
+          "question": "Do we support writing equality deletes, or only reading them?",
+          "details": "PyIceberg primarily focuses on analytical scan reads. Restricting MoR writes to position deletes first simplifies format v2 compliance.",
+          "owner": "Decide with · Python community, before Milestone 1"
+        },
+        {
+          "question": "Should delete files follow format v3 specifications?",
+          "details": "Spec v3 introduces roaring bitmap format additions. Keeping v2 compatibility for position deletes guarantees engine interoperability.",
+          "owner": "Decide with · Spec Parity, before Milestone 2"
+        }
+      ],
       "nodes": [
         "1078",
         "3270",
@@ -430,5 +517,5 @@
       }
     }
   },
-  "activePlanId": "plan-1779509761391"
+  "activePlanId": "plan-1779594189720"
 }

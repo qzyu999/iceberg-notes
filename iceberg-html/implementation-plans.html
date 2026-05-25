@@ -1,0 +1,1071 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dynamic Implementation Plan — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<script src="wiki.js" defer></script>
+<style>
+  /* Premium Implementation Plan Layout Custom Aesthetics */
+  .page-head {
+    margin-bottom: 32px;
+    max-width: 820px;
+  }
+  
+  .prompt-box {
+    background: var(--g100);
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    padding: 16px 20px;
+    font-size: 13.5px;
+    color: var(--g700);
+    margin-top: 16px;
+    line-height: 1.5;
+  }
+  
+  .prompt-box .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--g500);
+    display: block;
+    margin-bottom: 6px;
+    font-weight: bold;
+  }
+
+  /* Summary cells */
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 48px;
+  }
+  @media (max-width: 900px) {
+    .summary { grid-template-columns: repeat(2, 1fr); }
+  }
+  .summary .cell {
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: 0 4px 12px rgba(20,20,19,0.01);
+  }
+  .summary .k {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--g500);
+    margin-bottom: 6px;
+  }
+  .summary .v {
+    font-size: 16px;
+    color: var(--slate);
+    font-weight: 700;
+  }
+  .summary .v.accent {
+    color: var(--clay);
+  }
+
+  /* Milestones timeline */
+  .milestones {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .milestone {
+    display: grid;
+    grid-template-columns: 140px 28px 1fr;
+    gap: 0 18px;
+    position: relative;
+  }
+  .milestone .when {
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--g500);
+    padding-top: 4px;
+    font-weight: bold;
+  }
+  .milestone .dot-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .milestone .dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--paper);
+    border: 3px solid var(--clay);
+    margin-top: 4px;
+    flex-shrink: 0;
+  }
+  .milestone .dot.complete { background: var(--olive); border-color: var(--olive); }
+  .milestone .dot.in-progress { background: #F39C12; border-color: #F39C12; }
+  .milestone .dot.planned { background: #3498DB; border-color: #3498DB; }
+  .milestone .dot.blocked { background: #E74C3C; border-color: #E74C3C; }
+  
+  .milestone .line {
+    width: 2px;
+    flex: 1;
+    background: var(--g300);
+    margin: 4px 0;
+  }
+  .milestone:last-child .line {
+    display: none;
+  }
+  .milestone .body {
+    padding-bottom: 32px;
+  }
+  .milestone .body h3 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 19px;
+    color: var(--slate);
+    margin: 0 0 6px;
+  }
+  .milestone .body p {
+    font-size: 13.5px;
+    color: var(--g600);
+    margin: 0 0 12px;
+    max-width: 720px;
+    line-height: 1.5;
+  }
+  .milestone .tags {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .milestone .tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    background: var(--g100);
+    border: 1px solid var(--g300);
+    border-radius: 4px;
+    padding: 2px 7px;
+    color: var(--slate);
+    font-weight: bold;
+  }
+
+  /* Checklist tasks */
+  .plan-task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--ivory);
+    border: 1.5px solid var(--g300);
+    border-radius: 8px;
+    padding: 12px 16px;
+    max-width: 720px;
+  }
+  .plan-task-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--g700);
+  }
+  .plan-task-item.completed {
+    text-decoration: line-through;
+    color: var(--g500);
+  }
+
+  /* Section styling */
+  section.plan-section {
+    margin-bottom: 48px;
+  }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 12px;
+    border-bottom: 1.5px solid var(--g300);
+    padding-bottom: 8px;
+  }
+  .sec-head .num {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: bold;
+    background: var(--oat);
+    color: var(--slate);
+    padding: 3px 9px;
+    border-radius: 6px;
+  }
+  .sec-head h2 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: 24px;
+    color: var(--slate);
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .sec-intro {
+    font-size: 14px;
+    color: var(--g500);
+    max-width: 720px;
+    margin-bottom: 24px;
+    line-height: 1.5;
+  }
+
+  /* Dependency Data Flow SVG Diagram Card */
+  .diagram-card {
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    padding: 24px;
+    overflow-x: auto;
+    box-shadow: 0 4px 12px rgba(20,20,19,0.01);
+  }
+  .diagram-card svg {
+    display: block;
+    min-width: 760px;
+  }
+
+  /* Risk Table */
+  .risks {
+    border: 1.5px solid var(--g300);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--paper);
+    box-shadow: 0 4px 12px rgba(20,20,19,0.01);
+  }
+  .risks .row {
+    display: grid;
+    grid-template-columns: 1.5fr 100px 2fr;
+    gap: 0;
+  }
+  @media (max-width: 780px) {
+    .risks .row { grid-template-columns: 1fr; }
+  }
+  .risks .row + .row {
+    border-top: 1.5px solid var(--g300);
+  }
+  .risks .cell {
+    padding: 14px 18px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--g700);
+  }
+  .risks .cell + .cell {
+    border-left: 1.5px solid var(--g300);
+  }
+  @media (max-width: 780px) {
+    .risks .cell + .cell { border-left: none; border-top: 1px dashed var(--g300); }
+  }
+  .risks .head {
+    background: var(--g100);
+    font-weight: 700;
+    color: var(--slate);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: var(--sans);
+  }
+  .sev-badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-weight: bold;
+    text-align: center;
+  }
+  .sev-high { background: #F3D9CC; color: #8A3B1E; }
+  .sev-med  { background: var(--oat); color: var(--slate); }
+  .sev-low  { background: #E4E9DC; color: #4B5C39; }
+
+  /* Open Questions Cards */
+  .open-questions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 780px) {
+    .open-questions { grid-template-columns: 1fr; }
+  }
+  .q-card {
+    background: var(--paper);
+    border: 1.5px solid var(--g300);
+    border-left: 4px solid var(--clay);
+    border-radius: 10px;
+    padding: 18px 20px;
+    box-shadow: 0 4px 12px rgba(20,20,19,0.01);
+  }
+  .q-card .qt {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--slate);
+    margin-bottom: 6px;
+  }
+  .q-card .qd {
+    font-size: 13px;
+    color: var(--g600);
+    line-height: 1.5;
+  }
+  .q-card .q-owner {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--g500);
+    margin-top: 12px;
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header class="page-head">
+      <div class="eyebrow" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>Implementation Plan · Iceberg Cookbook</span>
+        <button class="btn btn-clay" id="btn-copy-markdown" style="font-size: 11px; padding: 2px 10px; height: 26px;" onclick="copyPlanMarkdown()">
+          📋 Copy as markdown
+        </button>
+      </div>
+      <h1 id="plan-title-display">Implementation plan</h1>
+      
+      <div style="display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap;">
+        <span style="font-size: 11px; font-weight: 800; color: var(--slate); font-family: var(--sans); letter-spacing: 0.05em;">PLAN WORKSPACE:</span>
+        <select id="select-active-plan" class="matrix-filter-select" style="border-color: var(--clay); color: var(--clay); font-weight: 600; min-width: 180px; height: 32px;" onchange="switchActivePlan(this.value)">
+          <!-- Dynamically populated -->
+        </select>
+      </div>
+
+      <div class="prompt-box">
+        <span class="label">Contribution Intent &amp; Guidelines</span>
+        This dynamic implementation plan compiles cycle milestones, checklists, and dependency flows directly from your active planning roadmap, optimized for skimming on both mobile and desktop screens.
+      </div>
+    </header>
+
+    <!-- Summary strip cells -->
+    <div class="summary" id="plan-summary-element"></div>
+
+    <!-- Section 1: Milestones Timeline -->
+    <section class="plan-section">
+      <div class="sec-head">
+        <span class="num">01</span>
+        <h2>Milestones &amp; Checklists</h2>
+      </div>
+      <p class="sec-intro">Itemized cycle slices mapping issues, PRs, and checklist tasks in logical dependency order. Completed items display a green milestone dot.</p>
+      
+      <div class="milestones" id="milestones-container"></div>
+    </section>
+
+    <!-- Section 2: Data Flow / Dependency DAG Diagram -->
+    <section class="plan-section">
+      <div class="sec-head">
+        <span class="num">02</span>
+        <h2>Logical Dependency Flow</h2>
+      </div>
+      <p class="sec-intro">Visual data pipeline mapping topological prerequisite relationships between plan components, dynamically built on-the-fly.</p>
+      
+      <div class="diagram-card" id="dependency-diagram-element"></div>
+    </section>
+
+    <!-- Section 3: Iceberg Contribution Risks -->
+    <section class="plan-section">
+      <div class="sec-head">
+        <span class="num">03</span>
+        <h2>Risks &amp; Mitigations</h2>
+      </div>
+      <p class="sec-intro">Standard architectural and concurrency challenges encountered during Iceberg integration, along with mitigation strategies.</p>
+      
+      <div class="risks" id="plan-risks-element"></div>
+    </section>
+
+    <!-- Section 4: Open Questions -->
+    <section class="plan-section">
+      <div class="sec-head">
+        <span class="num">04</span>
+        <h2>Open Spec Questions</h2>
+      </div>
+      <p class="sec-intro">Design ambiguities or open RFC consensus items requiring review prior to release stubs.</p>
+      
+      <div class="open-questions" id="plan-questions-element"></div>
+    </section>
+
+    <!-- Hidden export area -->
+    <div style="display: none;">
+      <textarea id="hidden-markdown-textarea"></textarea>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  // ── State Databases ──
+  let ghDatabase = [];      // Loaded collection
+  let archDatabase = {};    // Loaded overlays
+  let planNodes = [];       // Active nodes list
+
+  const ESTIMATE_SCORING = { S: 1, M: 2, L: 4 };
+
+  const defaultGitHubCollection = [
+    {
+      number: "9280",
+      title: "Core: Add nanosecond timestamp support to Spec v3",
+      type: "pr",
+      state: "open",
+      binding: "core",
+      author: "aokolnychyi",
+      body: "Implements core spec requirements. Closes #9201. Depends on discussions #9150.",
+      url: "https://github.com/apache/iceberg/pull/9280"
+    },
+    {
+      number: "9250",
+      title: "Python: Implement V3 nanosecond timestamp reads",
+      type: "pr",
+      state: "merged",
+      binding: "python",
+      author: "fokko",
+      body: "Brings Python bindings to parity with core Java changes. Closes #9201.",
+      url: "https://github.com/apache/iceberg/pull/9250"
+    },
+    {
+      number: "9201",
+      title: "Support Nanosecond Timestamp Resolution in Spec v3",
+      type: "issue",
+      state: "open",
+      binding: "core",
+      author: "rdblue",
+      body: "Adds high-precision timestamps to Spec V3. Tracked in discussion #9150.",
+      url: "https://github.com/apache/iceberg/issues/9201"
+    },
+    {
+      number: "9150",
+      title: "Discussions on Timestamp Precision in v3 Specs",
+      type: "discussion",
+      state: "closed",
+      binding: "core",
+      author: "jackye1995",
+      body: "RFC outlining design constraints for higher precision timestamp streams.",
+      url: "https://github.com/apache/iceberg/discussions/9150"
+    },
+    {
+      number: "9120",
+      title: "Core: Fix snapshot expiration boundary checks",
+      type: "issue",
+      state: "closed",
+      binding: "java",
+      author: "jackye1995",
+      body: "Fixes snapshot boundary checks. Resolved by PR #9250.",
+      url: "https://github.com/apache/iceberg/issues/9120"
+    }
+  ];
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    window.addEventListener("wiki-sync-status-changed", async () => {
+      await loadPlanData();
+    });
+    await loadPlanData();
+  });
+
+  async function loadPlanData() {
+    // 1. Load collection
+    let loadedGH = null;
+    if (window.wikiDirHandle) {
+      loadedGH = await window.readWikiFile("wiki-github-collection.json");
+    }
+    if (!loadedGH) {
+      const cached = localStorage.getItem("wiki-github-collection");
+      if (cached) loadedGH = JSON.parse(cached);
+    }
+    ghDatabase = (loadedGH && loadedGH.length > 0) ? loadedGH : JSON.parse(JSON.stringify(defaultGitHubCollection));
+
+    // 2. Load overlays
+    let loadedArch = null;
+    if (window.wikiDirHandle) {
+      loadedArch = await window.readWikiFile("wiki-architecture.json");
+    }
+    if (!loadedArch) {
+      const cached = localStorage.getItem("wiki-architecture-state");
+      if (cached) loadedArch = JSON.parse(cached);
+    }
+    archDatabase = loadedArch || {};
+
+    // 3. Align Databases
+    alignDatabases();
+
+    // 4. Populate plan switcher
+    populatePlanSwitcher();
+
+    // 5. Render
+    renderPlan();
+  }
+
+  function alignDatabases() {
+    if (!archDatabase || typeof archDatabase !== "object" || Array.isArray(archDatabase) || !archDatabase.savedPlans) {
+      archDatabase = {
+        savedPlans: {
+          "full-collection": {
+            name: "Full Collection Roadmap",
+            nodes: ghDatabase.map(item => item.number),
+            metadata: {}
+          }
+        },
+        activePlanId: "full-collection"
+      };
+    }
+    if (archDatabase.savedPlans["full-collection"]) {
+      archDatabase.savedPlans["full-collection"].nodes = ghDatabase.map(item => item.number);
+    }
+    if (!archDatabase.activePlanId || !archDatabase.savedPlans[archDatabase.activePlanId]) {
+      archDatabase.activePlanId = "full-collection";
+    }
+  }
+
+  function populatePlanSwitcher() {
+    const select = document.getElementById("select-active-plan");
+    if (!select) return;
+    select.innerHTML = "";
+    Object.keys(archDatabase.savedPlans).forEach(pid => {
+      const p = archDatabase.savedPlans[pid];
+      select.innerHTML += `<option value="${pid}" ${pid === archDatabase.activePlanId ? 'selected' : ''}>${p.name}</option>`;
+    });
+  }
+
+  async function switchActivePlan(planId) {
+    archDatabase.activePlanId = planId;
+    localStorage.setItem("wiki-architecture-state", JSON.stringify(archDatabase));
+    if (window.wikiDirHandle) {
+      await window.writeWikiFile("wiki-architecture.json", archDatabase);
+    }
+    renderPlan();
+  }
+
+  function compilePlanNodes() {
+    const activePlan = archDatabase.savedPlans[archDatabase.activePlanId] || { name: "Full Collection Roadmap", nodes: [], metadata: {} };
+    const nodesInPlan = activePlan.nodes || [];
+    const metadataMap = activePlan.metadata || {};
+
+    planNodes = ghDatabase
+      .filter(item => nodesInPlan.includes(item.number))
+      .map(item => {
+        const overlay = metadataMap[item.number] || {};
+        
+        let defaultLayer = "Catalog Operations";
+        const descText = `${item.title} ${item.body || ""}`.toLowerCase();
+        if (descText.includes("planning") || descText.includes("scan") || descText.includes("projection")) {
+          defaultLayer = "Planning & Scans";
+        } else if (descText.includes("delete") || descText.includes("row-level") || descText.includes("mor") || descText.includes("cow")) {
+          defaultLayer = "Row-Level Ops";
+        } else if (descText.includes("transaction") || descText.includes("isolation") || descText.includes("commit")) {
+          defaultLayer = "Transactions";
+        } else if (descText.includes("compaction") || descText.includes("rewrite") || descText.includes("expire") || descText.includes("gc")) {
+          defaultLayer = "Maintenance & GC";
+        }
+        const layer = overlay.layer || defaultLayer;
+
+        let defaultStatus = "planned";
+        if (item.state === "merged") {
+          defaultStatus = "complete";
+        } else if (item.state === "closed") {
+          defaultStatus = item.type === "pr" ? "blocked" : "complete";
+        } else if (item.state === "open" && (overlay.status === "in-progress" || (item.body || "").includes("- [x]"))) {
+          defaultStatus = "in-progress";
+        }
+        const status = overlay.status || defaultStatus;
+
+        let defaultEst = "S";
+        if (descText.includes("implement") || descText.includes("support") || descText.includes("rewrite")) {
+          defaultEst = "M";
+        }
+        if (descText.includes("vectored") || descText.includes("spec v3") || descText.includes("compaction")) {
+          defaultEst = "L";
+        }
+        const est = overlay.est || defaultEst;
+
+        const customTasks = overlay.customTasks || [];
+        const taskStates = overlay.taskStates || {};
+        const parsedBodyTasks = [];
+        const lines = (item.body || "").split(/\r?\n/);
+        let idx = 0;
+        lines.forEach(l => {
+          const m = l.match(/^[\s\-\*]*\[([ xX])\]\s*(.+)$/);
+          if (m) {
+            parsedBodyTasks.push({
+              id: `body-task-${idx++}`,
+              text: m[2].trim(),
+              completed: m[1].toLowerCase() === 'x',
+              isBody: true
+            });
+          }
+        });
+
+        parsedBodyTasks.forEach(t => {
+          if (taskStates[t.id] !== undefined) t.completed = taskStates[t.id];
+        });
+        customTasks.forEach(t => {
+          if (taskStates[t.id] !== undefined) t.completed = taskStates[t.id];
+        });
+
+        const parsedDependsOn = (item.outgoing || []).filter(depId => nodesInPlan.includes(depId));
+        const customDependsOn = overlay.customDependsOn || [];
+        const ignoredDependsOn = overlay.ignoredDependsOn || [];
+        const activeInherentDeps = parsedDependsOn.filter(depId => !ignoredDependsOn.includes(depId));
+        const filteredCustomDeps = customDependsOn.filter(depId => nodesInPlan.includes(depId));
+        const dependsOn = [...new Set([...activeInherentDeps, ...filteredCustomDeps])];
+
+        return {
+          id: item.number,
+          title: item.title,
+          type: item.type || "issue",
+          author: item.author || "iceberg-dev",
+          binding: item.binding || "core",
+          desc: item.body || "",
+          layer: layer,
+          status: status,
+          est: est,
+          dependsOn: dependsOn,
+          tasks: [...parsedBodyTasks, ...customTasks],
+          visualGroups: overlay.visualGroups || (overlay.visualGroup ? [overlay.visualGroup] : [])
+        };
+      });
+  }
+
+  function renderPlan() {
+    compilePlanNodes();
+
+    const activePlan = archDatabase.savedPlans[archDatabase.activePlanId] || { name: "Full Collection Roadmap" };
+    document.getElementById("plan-title-display").innerHTML = `Implementation Plan: <em>${activePlan.name}</em>`;
+
+    if (planNodes.length === 0) {
+      document.getElementById("plan-summary-element").innerHTML = `
+        <div class="cell" style="grid-column: 1 / -1; text-align: center; color: var(--g500); font-style: italic;">
+          This plan workspace is currently empty. Please add nodes in your Architectural DAG Builder to populate this template!
+        </div>
+      `;
+      document.getElementById("milestones-container").innerHTML = "";
+      document.getElementById("dependency-diagram-element").innerHTML = "";
+      return;
+    }
+
+    // 1. Render Summary Strip
+    const totalSlices = planNodes.length;
+    const completedSlices = planNodes.filter(n => n.status === "complete").length;
+    const bindingsTouched = [...new Set(planNodes.map(n => n.binding.toUpperCase()))].join(", ");
+    const totalPoints = planNodes.reduce((acc, n) => acc + (ESTIMATE_SCORING[n.est] || 1), 0);
+
+    const summary = document.getElementById("plan-summary-element");
+    summary.innerHTML = `
+      <div class="cell"><div class="k">Completed</div><div class="v accent">${completedSlices} / ${totalSlices} Slices</div></div>
+      <div class="cell"><div class="k">Total Sized Effort</div><div class="v">${totalPoints} story points</div></div>
+      <div class="cell"><div class="k">Language Bindings</div><div class="v">${bindingsTouched}</div></div>
+      <div class="cell"><div class="k">Shared Flag</div><div class="v">${activePlan.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_v1</div></div>
+    `;
+
+    // 2. Render Timeline Milestones (Sort topologically by dependencies first)
+    // Compute depth
+    const depths = {};
+    planNodes.forEach(n => depths[n.id] = 0);
+    for (let iter = 0; iter < 10; iter++) {
+      let changed = false;
+      planNodes.forEach(node => {
+        (node.dependsOn || []).forEach(depId => {
+          if (depths[node.id] < (depths[depId] || 0) + 1) {
+            depths[node.id] = (depths[depId] || 0) + 1;
+            changed = true;
+          }
+        });
+      });
+      if (!changed) break;
+    }
+
+    const sortedNodes = [...planNodes].sort((a, b) => (depths[a.id] || 0) - (depths[b.id] || 0));
+
+    const container = document.getElementById("milestones-container");
+    container.innerHTML = "";
+
+    sortedNodes.forEach((node, idx) => {
+      let checklistHTML = "";
+      if (node.tasks.length > 0) {
+        checklistHTML = `
+          <div class="plan-task-list">
+            <div style="font-size: 11px; font-weight: bold; color: var(--clay); font-family: var(--sans); margin-bottom: 6px; letter-spacing: 0.05em;">TASKS CHECKLIST</div>
+            ${node.tasks.map(t => `
+              <div class="plan-task-item ${t.completed ? 'completed' : ''}">
+                <span>${t.completed ? '☑' : '☐'}</span>
+                <span>${t.text}</span>
+              </div>
+            `).join("")}
+          </div>
+        `;
+      }
+
+      // HSL color-hashing for bindings
+      let hash = 0;
+      for (let i = 0; i < node.binding.length; i++) {
+        hash = node.binding.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const hue = Math.abs(hash % 360);
+
+      container.innerHTML += `
+        <div class="milestone">
+          <div class="when">Milestone ${idx + 1}</div>
+          <div class="dot-col">
+            <span class="dot ${node.status}"></span>
+            <span class="line"></span>
+          </div>
+          <div class="body">
+            <h3>#${node.id}: ${node.title}</h3>
+            <p>${node.desc ? node.desc.substring(0, 160) + '...' : 'No description provided.'}</p>
+            <div class="tags">
+              <span class="tag" style="background: hsla(${hue}, 60%, 40%, 0.1); border-color: hsla(${hue}, 60%, 40%, 0.2); color: hsla(${hue}, 70%, 30%, 1); text-transform: uppercase;">
+                ${node.binding}
+              </span>
+              <span class="tag">${node.layer}</span>
+              <span class="tag">Size: ${node.est} (${ESTIMATE_SCORING[node.est] || 1} pts)</span>
+              ${node.visualGroups.map(g => `<span class="tag" style="background: var(--clay-l); border-color: var(--clay); color: var(--clay);">${g.toUpperCase()}</span>`).join("")}
+            </div>
+            ${checklistHTML}
+          </div>
+        </div>
+      `;
+    });
+
+    // 3. Render SVG dependency pipeline flow
+    renderDependencyFlowDiagram(sortedNodes);
+
+    // 4. Render Dynamic Risks
+    renderRisks(activePlan);
+
+    // 5. Render Dynamic Open Questions
+    renderOpenQuestions(activePlan);
+  }
+
+  function renderDependencyFlowDiagram(nodes) {
+    const container = document.getElementById("dependency-diagram-element");
+    container.innerHTML = "";
+
+    const boxW = 160;
+    const boxH = 50;
+    const rowH = 90;
+    const colW = 210;
+
+    // Calculate columns based on sorted order depth stubs
+    const depths = {};
+    nodes.forEach(n => depths[n.id] = 0);
+    for (let iter = 0; iter < 10; iter++) {
+      let changed = false;
+      nodes.forEach(node => {
+        (node.dependsOn || []).forEach(depId => {
+          if (depths[node.id] < (depths[depId] || 0) + 1) {
+            depths[node.id] = (depths[depId] || 0) + 1;
+            changed = true;
+          }
+        });
+      });
+      if (!changed) break;
+    }
+
+    const colGroups = {};
+    nodes.forEach(n => {
+      const d = depths[n.id] || 0;
+      if (!colGroups[d]) colGroups[d] = [];
+      colGroups[d].push(n);
+    });
+
+    const numCols = Object.keys(colGroups).length;
+    const maxRows = Math.max(...Object.values(colGroups).map(arr => arr.length));
+
+    const svgW = Math.max(760, numCols * colW);
+    const svgH = Math.max(220, maxRows * rowH + 40);
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", `0 0 ${svgW} ${svgH}`);
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", svgH);
+
+    // Definitions for markers
+    svg.innerHTML = `
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--g400)"/>
+        </marker>
+        <marker id="arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--clay)"/>
+        </marker>
+      </defs>
+    `;
+
+    const nodeCoords = {};
+
+    // Place boxes and draw them
+    Object.keys(colGroups).forEach(colIdxStr => {
+      const colIdx = parseInt(colIdxStr);
+      const arr = colGroups[colIdx];
+      const count = arr.length;
+      const startY = (svgH - (count * rowH)) / 2;
+
+      arr.forEach((node, rowIdx) => {
+        const x = 30 + colIdx * colW;
+        const y = startY + rowIdx * rowH + 10;
+        nodeCoords[node.id] = { x: x + boxW / 2, y: y + boxH / 2, leftX: x, rightX: x + boxW, centerY: y + boxH / 2 };
+
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+
+        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", x);
+        rect.setAttribute("y", y);
+        rect.setAttribute("width", boxW);
+        rect.setAttribute("height", boxH);
+        rect.setAttribute("rx", "8");
+        rect.setAttribute("ry", "8");
+
+        let border = "var(--g300)";
+        if (node.status === "complete") border = "var(--olive)";
+        if (node.status === "in-progress") border = "#F39C12";
+        if (node.status === "blocked") border = "#E74C3C";
+
+        rect.setAttribute("stroke", border);
+        rect.setAttribute("stroke-width", "2");
+        rect.setAttribute("fill", "var(--paper)");
+
+        const titleText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        titleText.setAttribute("x", x + boxW / 2);
+        titleText.setAttribute("y", y + 24);
+        titleText.setAttribute("text-anchor", "middle");
+        titleText.setAttribute("font-size", "10px");
+        titleText.setAttribute("font-weight", "bold");
+        titleText.setAttribute("fill", "var(--slate)");
+        
+        let labelText = `#${node.id}: ${node.title}`;
+        if (labelText.length > 22) labelText = labelText.substring(0, 19) + "...";
+        titleText.textContent = labelText;
+
+        const subtitleText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        subtitleText.setAttribute("x", x + boxW / 2);
+        subtitleText.setAttribute("y", y + 38);
+        subtitleText.setAttribute("text-anchor", "middle");
+        subtitleText.setAttribute("font-size", "8.5px");
+        subtitleText.setAttribute("font-weight", "bold");
+        subtitleText.setAttribute("fill", "var(--g500)");
+        subtitleText.textContent = `${node.binding.toUpperCase()} · ${node.status.toUpperCase()}`;
+
+        g.appendChild(rect);
+        g.appendChild(titleText);
+        g.appendChild(subtitleText);
+        svg.appendChild(g);
+      });
+    });
+
+    // Draw dependency lines (prerequisites flow)
+    nodes.forEach(node => {
+      (node.dependsOn || []).forEach(depId => {
+        const source = nodeCoords[depId];
+        const target = nodeCoords[node.id];
+
+        if (source && target) {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          
+          // Draw a smooth bezier curve connecting output right-edge to input left-edge
+          const startX = source.rightX;
+          const startY = source.centerY;
+          const endX = target.leftX;
+          const endY = target.centerY;
+          const controlOffset = Math.max(40, (endX - startX) * 0.4);
+
+          const dPath = `M ${startX} ${startY} C ${startX + controlOffset} ${startY}, ${endX - controlOffset} ${endY}, ${endX} ${endY}`;
+          path.setAttribute("d", dPath);
+          path.setAttribute("fill", "none");
+          
+          const isActive = node.status === "in-progress" || node.status === "complete";
+          path.setAttribute("stroke", isActive ? "var(--clay)" : "var(--g300)");
+          path.setAttribute("stroke-width", isActive ? "2.2" : "1.5");
+          path.setAttribute("marker-end", isActive ? "url(#arrow-active)" : "url(#arrow)");
+
+          svg.appendChild(path);
+        }
+      });
+    });
+
+    container.appendChild(svg);
+    
+    const caption = document.createElement("p");
+    caption.className = "caption";
+    caption.innerHTML = "Solid lines outline topological prerequisite stubs. Highlighted clay paths map active development/review flows.";
+    container.appendChild(caption);
+  }
+
+  // Compile full shareable markdown Implementation Plan report
+  function copyPlanMarkdown() {
+    const activePlanId = archDatabase.activePlanId;
+    const plan = archDatabase.savedPlans[activePlanId] || { name: "Active Contribution" };
+
+    let mdLines = [];
+    mdLines.push(`# Implementation Plan: ${plan.name}`);
+    mdLines.push(`*Dynamically compiled on ${new Date().toLocaleDateString()}*`);
+    mdLines.push("");
+    mdLines.push("This document outlines prioritized cycle milestone timelines, actionable checklists, and topological dependency flows.");
+    mdLines.push("");
+
+    const totalSlices = planNodes.length;
+    const completedSlices = planNodes.filter(n => n.status === "complete").length;
+    const totalPoints = planNodes.reduce((acc, n) => acc + (ESTIMATE_SCORING[n.est] || 1), 0);
+    const bindingsTouched = [...new Set(planNodes.map(n => n.binding.toUpperCase()))].join(", ");
+
+    mdLines.push("## 📊 Plan Metadata Summary");
+    mdLines.push(`*   **Progress Metrics**: \`${completedSlices} / ${totalSlices} Milestones Complete\``);
+    mdLines.push(`*   **Total Sized Effort**: \`${totalPoints} Story Points\``);
+    mdLines.push(`*   **Language Scope**: \`${bindingsTouched}\``);
+    mdLines.push(`*   **Feature Flag**: \`${plan.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_v1\``);
+    mdLines.push("");
+
+    mdLines.push("## 🚀 Milestones Timeline");
+    mdLines.push("Slices are organized in strict topological dependency sequence.");
+    mdLines.push("");
+
+    // Sort nodes
+    const depths = {};
+    planNodes.forEach(n => depths[n.id] = 0);
+    for (let iter = 0; iter < 10; iter++) {
+      let changed = false;
+      planNodes.forEach(node => {
+        (node.dependsOn || []).forEach(depId => {
+          if (depths[node.id] < (depths[depId] || 0) + 1) {
+            depths[node.id] = (depths[depId] || 0) + 1;
+            changed = true;
+          }
+        });
+      });
+      if (!changed) break;
+    }
+    const sortedNodes = [...planNodes].sort((a, b) => (depths[a.id] || 0) - (depths[b.id] || 0));
+
+    sortedNodes.forEach((node, idx) => {
+      const stateIcon = node.status === "complete" ? "🟢" : (node.status === "in-progress" ? "🟡" : "🔵");
+      mdLines.push(`### Milestone ${idx + 1}: #${node.id} ${stateIcon} ${node.title}`);
+      mdLines.push(`*   **Subsystem Layer**: \`${node.layer}\` | **Effort Weight**: \`${node.est} (${ESTIMATE_SCORING[node.est] || 1} pts)\` | **Binding**: \`${node.binding.toUpperCase()}\``);
+      if (node.visualGroups.length > 0) {
+        mdLines.push(`*   **Visual Groups**: ${node.visualGroups.map(g => `\`${g}\``).join(", ")}`);
+      }
+      mdLines.push(`*   **Milestone Description**: _${node.desc ? node.desc.substring(0, 180) + '...' : 'No description.'}_`);
+      
+      if (node.tasks.length > 0) {
+        mdLines.push("*   **Actionable Checklist Tasks**:");
+        node.tasks.forEach(t => {
+          mdLines.push(`    - [${t.completed ? 'x' : ' '}] ${t.text}`);
+        });
+      }
+      mdLines.push("");
+    });
+
+    const fullMarkdown = mdLines.join("\n");
+    const copyBtn = document.getElementById("btn-copy-markdown");
+
+    navigator.clipboard.writeText(fullMarkdown).then(() => {
+      copyBtn.textContent = "Copied ✓";
+      copyBtn.classList.add("copied");
+      setTimeout(() => {
+        copyBtn.textContent = "📋 Copy as markdown";
+        copyBtn.classList.remove("copied");
+      }, 1500);
+    }).catch(err => {
+      const ta = document.getElementById("hidden-markdown-textarea");
+      ta.value = fullMarkdown;
+      ta.style.display = "block";
+      ta.select();
+      try {
+        document.execCommand("copy");
+        copyBtn.textContent = "Copied ✓";
+      } catch (e) {
+        alert("Failed to copy. Please select and copy text manually.");
+      }
+      ta.style.display = "none";
+    });
+  }
+
+  const DEFAULT_RISKS = [
+    {
+      risk: "<strong>TableMetadata Concurrency:</strong> Parallel commits conflict during rest metastore swaps.",
+      sev: "HIGH",
+      mitigation: "Utilize optimistic retry policies and enforce transaction stubs with clean snapshot-isolation rollback boundaries."
+    },
+    {
+      risk: "<strong>Serialization Breakages:</strong> Introducing properties or spec version gating breaks minor engine API schemas.",
+      sev: "MED",
+      mitigation: "Enforce custom kebab-case parsers (e.g. <code>TableMetadataParser</code>) without using Jackson annotations; register revapi track gates."
+    },
+    {
+      risk: "<strong>Resource Leaks:</strong> Large manifest-group iterations mask I/O leaks in streaming pipelines.",
+      sev: "LOW",
+      mitigation: "Always wrap closeable collections in D3-like custom <code>try-with-resources</code> stubs using Iceberg's <code>CloseableIterable</code> wrappers."
+    }
+  ];
+
+  const DEFAULT_QUESTIONS = [
+    {
+      question: "Do we allow editing deletes, or only soft deletes?",
+      details: "Soft deletes are simpler to persist in V2 format lists, whereas complete rewrites during compaction require sequence number gating.",
+      owner: "Decide with · Community Consensus, before Milestone 3"
+    },
+    {
+      question: "Vectorized offset cache sizes inside pyiceberg",
+      details: "Setting negative limits disables caching. We should confirm standard memory bounds across all client catalogs to avoid memory leakage.",
+      owner: "Decide with · binding maintainers, before Milestone 4"
+    }
+  ];
+
+  function renderRisks(plan) {
+    const container = document.getElementById("plan-risks-element");
+    if (!container) return;
+
+    const risks = plan.risks && plan.risks.length > 0 ? plan.risks : DEFAULT_RISKS;
+
+    let html = `
+      <div class="row">
+        <div class="cell head">Risk</div>
+        <div class="cell head">Sev</div>
+        <div class="cell head">Mitigation</div>
+      </div>
+    `;
+
+    risks.forEach(r => {
+      let sevClass = "sev-low";
+      if (r.sev === "HIGH") sevClass = "sev-high";
+      if (r.sev === "MED") sevClass = "sev-med";
+
+      html += `
+        <div class="row">
+          <div class="cell">${r.risk}</div>
+          <div class="cell"><span class="sev-badge ${sevClass}">${r.sev}</span></div>
+          <div class="cell">${r.mitigation}</div>
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+  }
+
+  function renderOpenQuestions(plan) {
+    const container = document.getElementById("plan-questions-element");
+    if (!container) return;
+
+    const questions = plan.openQuestions && plan.openQuestions.length > 0 ? plan.openQuestions : DEFAULT_QUESTIONS;
+
+    let html = "";
+    questions.forEach(q => {
+      html += `
+        <div class="q-card">
+          <div class="qt">${q.question}</div>
+          <div class="qd">${q.details}</div>
+          <div class="q-owner">${q.owner}</div>
+        </div>
+      `;
+    });
+
+    container.innerHTML = html;
+  }
+</script>
+</body>
+</html>
