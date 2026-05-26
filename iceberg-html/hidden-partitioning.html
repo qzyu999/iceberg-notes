@@ -1,0 +1,213 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hidden Partitioning Spec — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+<script>
+// Inline tab switcher utility
+function switchRecipeTab(recipeId, version) {
+  const container = document.getElementById(`recipe-${recipeId}`);
+  if (!container) return;
+
+  const tabs = container.querySelectorAll(".recipe-tab");
+  tabs.forEach(tab => {
+    if (tab.getAttribute("data-ver") === version) {
+      tab.classList.add("active");
+    } else {
+      tab.classList.remove("active");
+    }
+  });
+
+  const codes = container.querySelectorAll(".recipe-code");
+  codes.forEach(code => {
+    if (code.getAttribute("data-ver") === version) {
+      code.style.display = "block";
+    } else {
+      code.style.display = "none";
+    }
+  });
+}
+</script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Cookbook Recipe 8</div>
+      <h1>Hidden <em>Partitioning</em></h1>
+      <p class="tagline">
+        decoupling queries from physical layout via mathematical projection, partition transforms, and automatic predicate pushdown.
+      </p>
+    </header>
+
+    <!-- SECTION I: TRANSFORMS -->
+    <section id="partitioning-theory">
+      <h2>I. Partitioning Evolution &amp; Hidden Pruning</h2>
+      <p class="sec-desc">
+        In legacy Hive tables, partitioning is user-facing. To query efficiently, a user must know the exact physical partition columns (e.g. <code>WHERE partition_date = '2026-05-25'</code>). If they filter by raw timestamp instead, the query planner fails to prune directories, causing massive full-table scans. 
+        Iceberg solves this by decoupling logical queries from physical layout using <strong>Hidden Partitioning</strong>.
+      </p>
+
+      <!-- PLAIN ENGLISH CALLOUT -->
+      <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 18px; margin-bottom: 24px; border-left: 4px solid var(--clay);">
+        <div style="font-family: var(--sans); font-size: 13.5px; font-weight: bold; color: var(--slate); margin-bottom: 6px;">
+          💡 Hidden Partitioning: The Plain English Concept
+        </div>
+        <div style="font-size: 12.5px; line-height: 1.5; color: var(--g700);">
+          Imagine sorting mail in a post office:
+          <br>• <strong>Hive Partitioning</strong> is like forcing customers to write the exact mailroom shelf ID on their envelopes: <em>"Send to Bob (Shelf 42B)"</em>. If the customer forgets the shelf ID, the mail carrier has to search through millions of shelves manually.
+          <br>• <strong>Iceberg Hidden Partitioning</strong> lets customers write standard addresses: <em>"Send to Bob, living in Seattle"</em>. The post office itself contains a mathematical mapping (zip code transform) that automatically directs the letter to Shelf 42B. 
+          <br>Users write logical filters (e.g. <em>"events today"</em>), and Iceberg translates them to physical files under the hood, completely transparently.
+        </div>
+      </div>
+
+      <h3>1. Mathematical Transforms and Specifications</h3>
+      <p>
+        Iceberg partition columns are defined as deterministic transform functions applied to source column values. The V2 specification defines several vital mathematical transform functions:
+      </p>
+
+      <div class="parity-table-container" style="margin-top: 16px; margin-bottom: 24px;">
+        <table class="parity-table" style="width: 100%; font-size: 12.5px; line-height: 1.45;">
+          <thead>
+            <tr>
+              <th style="width: 25%;">Transform Function</th>
+              <th style="width: 30%;">Mathematical Mapping</th>
+              <th style="width: 45%;">Plain English Operation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong><code>identity</code></strong></td>
+              <td>$$\tau(x) = x$$</td>
+              <td>Keeps the exact original value (no transform).</td>
+            </tr>
+            <tr>
+              <td><strong><code>bucket[W]</code></strong></td>
+              <td>$$\tau(x) = (\text{Murmur3Hash}(x) \land \text{0x7FFFFFFF}) \pmod W$$</td>
+              <td>Hashes the value and bins it into $W$ partitions, ensuring optimal write distribution.</td>
+            </tr>
+            <tr>
+              <td><strong><code>truncate[W]</code></strong></td>
+              <td>$$\tau(x) = x - (x \bmod W)$$</td>
+              <td>Truncates numeric values to W-multiples or strings to W-length prefixes.</td>
+            </tr>
+            <tr>
+              <td><strong><code>days</code></strong></td>
+              <td>$$\tau(x) = \lfloor x / 86,400,000 \rfloor$$</td>
+              <td>Converts epoch milliseconds (timestamps) to epoch days.</td>
+            </tr>
+            <tr>
+              <td><strong><code>hours</code></strong></td>
+              <td>$$\tau(x) = \lfloor x / 3,600,000 \rfloor$$</td>
+              <td>Converts epoch milliseconds (timestamps) to epoch hours.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>2. Formal Proof: Scan Pruning by Predicate Pushdown</h3>
+      <p>
+        To prove that queries filtering by raw columns prune partition files without user-facing partition arguments, let us define the <strong>Projection Operator ($\Pi$)</strong>.
+      </p>
+      <p>
+        Let $c$ be a column of table $T$ with domain $D_c$. Let a query $Q$ contain a filter predicate $F_Q$ defining a subset of valid column values $D_Q \subseteq D_c$. 
+        Let a partition spec map column $c$ to a partition field $p$ using the transform function $\tau: D_c \to D_p$.
+      </p>
+      <p>
+        The query engine computes the partition-level filter bounds by projecting the logical domain $D_Q$ through the transform:
+        $$D_p = \tau(D_Q) = \{ \tau(x) \mid x \in D_Q \}$$
+      </p>
+      <p>
+        For any partition file $f$ storing records from partition value $v_f \in D_p$, the file is scanned if and only if its partition value intersects with the projected query boundaries:
+        $$\text{Scan}(f) \iff v_f \in \tau(D_Q)$$
+      </p>
+      <p>
+        Conversely, the scan planner is mathematically guaranteed to prune file $f$ if:
+        $$v_f \notin \tau(D_Q)$$
+      </p>
+
+      <!-- CONCRETE PROOF CASE -->
+      <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 18px; margin-top: 16px; margin-bottom: 24px; border-left: 4px solid var(--olive);">
+        <div style="font-family: var(--sans); font-size: 13.5px; font-weight: bold; color: var(--slate); margin-bottom: 6px;">
+          ⚖️ Mathematical Proof Walkthrough: Timestamp to Hour Pruning
+        </div>
+        <div style="font-size: 12.5px; line-height: 1.5; color: var(--g700);">
+          Let table $T$ be partitioned by event timestamp transformed to <code>hours</code>: $\tau(t) = \lfloor t / 3,600,000 \rfloor$.
+          <br>• The user queries: <code>WHERE event_time &gt;= '2026-05-25 12:00:00' AND event_time &lt;= '2026-05-25 13:30:00'</code>.
+          <br>• In epoch milliseconds, the query bounds correspond to the logical range: $D_Q = [1779710400000, 1779715800000]$.
+          <br>• Projecting the range through $\tau$:
+          $$\tau(1779710400000) = \lfloor 1779710400000 / 3,600,000 \rfloor = 494364$$
+          $$\tau(1779715800000) = \lfloor 1779715800000 / 3,600,000 \rfloor = 494365$$
+          <br>• The projected partition domain is $D_p = [494364, 494365]$ (representing hours 12 and 13).
+          <br>• The scan engine only reads partition files where $v_f \in \{494364, 494365\}$. Any partition file with $v_f = 494363$ (Hour 11) is pruned, yielding perfect sub-second execution without user-facing partition fields!
+        </div>
+      </div>
+
+      <h3>3. Physical Mappings: Hive vs. Iceberg</h3>
+      <p>
+        Hidden partitioning completely decouples the physical cloud object folders from table semantics. Hive requires files to reside in rigid folders. Iceberg uses the manifest index to point to files directly, regardless of folder structures:
+      </p>
+
+      <pre style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 16px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--g800); overflow-x: auto;">
+[TRADITIONAL HIVE PATHS (Rigid &amp; Fragile)]
+ └── s3://bucket/table/
+      ├── event_date=2026-05-25/         &lt;-- If renamed or moved, the state breaks
+      │    └── data.parquet
+      └── event_date=2026-05-26/
+           └── data.parquet
+
+[ICEBERG METADATA-DRIVEN INDEX (Decoupled &amp; Robust)]
+ ├── manifest.avro  -------> Pointer A: s3://bucket/data/random_hash_A.parquet (Partition: event_date=2026-05-25)
+ └── data/                  Pointer B: s3://bucket/data/random_hash_B.parquet (Partition: event_date=2026-05-26)
+      ├── random_hash_A.parquet
+      └── random_hash_B.parquet
+      </pre>
+
+      <div class="recipe-container" id="recipe-r8">
+        <div class="recipe-header">
+          <div class="recipe-title-text">Table Partitioning Schemes</div>
+          <div class="recipe-tabs">
+            <button class="recipe-tab active" data-ver="ddl" onclick="switchRecipeTab('r8', 'ddl')">DDL Partition Transforms</button>
+            <button class="recipe-tab" data-ver="evolution" onclick="switchRecipeTab('r8', 'evolution')">Partition Evolution (No Rewrites)</button>
+          </div>
+        </div>
+        <div class="recipe-code-wrapper">
+          <pre class="recipe-code" data-ver="ddl"><code>-- Create an Iceberg table with dynamic hidden partitioning transforms in Spark SQL
+CREATE TABLE catalog.db.user_events (
+  id BIGINT,
+  event_time TIMESTAMP,
+  category STRING
+)
+USING iceberg
+PARTITIONED BY (
+  hours(event_time),                -- Automatically partition by hour internally
+  bucket(16, id)                    -- Hash partition IDs across 16 buckets
+);</code></pre>
+          <pre class="recipe-code" data-ver="evolution" style="display: none;"><code>-- Evolve table partitioning dynamically from days to hours without rewriting old files
+ALTER TABLE catalog.db.user_events 
+  ADD PARTITION FIELD hours(event_time);
+
+-- Old records remain partitioned by day; new records are partitioned by hour.
+-- The query planner automatically handles both partition schemes in a single scan!</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Time-Travel Querying — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+<script>
+// Inline tab switcher utility
+function switchRecipeTab(recipeId, version) {
+  const container = document.getElementById(`recipe-${recipeId}`);
+  if (!container) return;
+
+  const tabs = container.querySelectorAll(".recipe-tab");
+  tabs.forEach(tab => {
+    if (tab.getAttribute("data-ver") === version) {
+      tab.classList.add("active");
+    } else {
+      tab.classList.remove("active");
+    }
+  });
+
+  const codes = container.querySelectorAll(".recipe-code");
+  codes.forEach(code => {
+    if (code.getAttribute("data-ver") === version) {
+      code.style.display = "block";
+    } else {
+      code.style.display = "none";
+    }
+  });
+}
+</script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Cookbook Recipe 9</div>
+      <h1>Time-Travel <em>Querying</em></h1>
+      <p class="tagline">
+        Reconstructing historical snapshots, timestamp resolution algorithms, and programmatic PyIceberg/SQL lineage travel.
+      </p>
+    </header>
+
+    <!-- SECTION I: LINEAGE -->
+    <section id="timetravel-theory">
+      <h2>I. Historical Snapshots &amp; Timeline Lineage</h2>
+      <p class="sec-desc">
+        Because Iceberg represents a table's state explicitly as an array of immutable snapshots, we can perform historical queries to audit modifications, rollback catastrophic errors, or run reproducible analytics.
+      </p>
+
+      <!-- PLAIN ENGLISH CALLOUT -->
+      <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 18px; margin-bottom: 24px; border-left: 4px solid var(--clay);">
+        <div style="font-family: var(--sans); font-size: 13.5px; font-weight: bold; color: var(--slate); margin-bottom: 6px;">
+          💡 Time Travel: The Plain English Concept
+        </div>
+        <div style="font-size: 12.5px; line-height: 1.5; color: var(--g700);">
+          Think of Time Travel like checking out files in a <strong>Git repository</strong>:
+          <br>• Every commit in Git represents a snapshot of your project's files. You can type <code>git checkout [commit-id]</code> to instantly restore your workspace to that exact moment in history.
+          <br>• Iceberg works exactly the same way. Every commit adds a snapshot ID with a timestamp. When you query with Time Travel, you tell the engine: <em>"Reconstruct the table exactly as it looked at commit ID 4529"</em> or <em>"as of yesterday at 5 PM."</em>
+          <br>Iceberg simply loads that historical snapshot's manifest list, completely bypassing all subsequent updates.
+        </div>
+      </div>
+
+      <h3>1. Mathematical Formulations of Time Travel Mapping</h3>
+      <p>
+        Let $T$ be the table history containing an ordered sequence of snapshots $T = \langle S_0, S_1, \dots, S_n \rangle$. Each snapshot $S_k$ is annotated with a unique identifier $\text{id}(S_k)$ and a Unix commit timestamp $t(S_k) \in \mathbb{N}$ representing when the snapshot was committed.
+      </p>
+      <p>
+        The reconstitution function $\Psi(S)$ extracts the active set of rows corresponding to a given snapshot state. Time Travel reconstructs the active dataset $R_{\text{active}}$ under two different query modes:
+      </p>
+
+      <div class="equation-box">
+        <div class="eq-label">Definition 1: AS OF Snapshot ID</div>
+        <div class="eq-math">
+          $$R_{\text{active}}(\text{id}_{\text{target}}) = \bigcup_{d \in D_{\text{target}}} \Psi(d) \quad \text{where} \quad S_{\text{target}} = S_k \text{ s.t. } \text{id}(S_k) = \text{id}_{\text{target}}$$
+        </div>
+        <div class="eq-explanation">
+          <strong>The Mapping:</strong> By specifying a precise snapshot ID, the reader directly loads that snapshot's manifest list $D_{\text{target}}$, skipping the current table root pointer entirely. This guarantees mathematically exact reproducibility.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Definition 2: AS OF Timestamp</div>
+        <div class="eq-math">
+          $$R_{\text{active}}(t_{\text{target}}) = R_{\text{active}}(\text{id}(S_m)) \quad \text{where} \quad m = \max \{ k \mid t(S_k) \le t_{\text{target}} \}$$
+        </div>
+        <div class="eq-explanation">
+          <strong>The Mapping:</strong> If a user requests state as of a physical clock timestamp $t_{\text{target}}$, the query engine scans the metadata snapshot array to find $S_m$—the latest snapshot committed at or before the targeted timestamp.
+        </div>
+      </div>
+
+      <h3>2. Snapshot Evolution Tree</h3>
+      <p>
+        The table metadata tracks snapshots sequentially. Old snapshots are not deleted immediately; they remain in cloud storage until explicitly purged by maintenance retention cycles:
+      </p>
+
+      <pre style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 16px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--g800); overflow-x: auto;">
+[SNAPSHOTS TIMELINE (Immutable &amp; Auditable)]
+ Snapshot 0 (id=101, t=10:00) ──> manifest-list-101.avro ──> data-1.parquet
+                                                                 │
+                                                                 ▼
+ Snapshot 1 (id=102, t=11:00) ──> manifest-list-102.avro ──> data-1.parquet, data-2.parquet
+                                                                 │
+                                                                 ▼ (Latest Root Pointer)
+ Snapshot 2 (id=103, t=12:00) ──> manifest-list-103.avro ──> data-1.parquet, data-2.parquet, data-3.parquet
+
+* Time Travel "AS OF 11:30" resolves to Snapshot 102. It scans data-1 and data-2, completely ignoring data-3!
+      </pre>
+
+      <div class="recipe-container" id="recipe-r9">
+        <div class="recipe-header">
+          <div class="recipe-title-text">Lineage SQL &amp; Programmatic Queries</div>
+          <div class="recipe-tabs">
+            <button class="recipe-tab active" data-ver="sql" onclick="switchRecipeTab('r9', 'sql')">Spark SQL Time Travel</button>
+            <button class="recipe-tab" data-ver="pyiceberg" onclick="switchRecipeTab('r9', 'pyiceberg')">PyIceberg Programmatic API</button>
+          </div>
+        </div>
+        <div class="recipe-code-wrapper">
+          <pre class="recipe-code" data-ver="sql"><code>-- 1. Query table state as of a specific historical snapshot ID
+SELECT count(*) FROM catalog.db.user_events 
+  VERSION AS OF 890213084920;
+
+-- 2. Query table state as of a precise timestamp in the past
+SELECT * FROM catalog.db.user_events 
+  TIMESTAMP AS OF '2026-05-25 10:00:00';
+
+-- 3. Query historical records using system snapshot pathing syntax
+SELECT * FROM catalog.db.user_events.snapshots; -- Inspects table snapshot timeline metadata</code></pre>
+          <pre class="recipe-code" data-ver="pyiceberg" style="display: none;"><code># Programmatic time-travel and data scanning using PyIceberg
+from pyiceberg.catalog import load_catalog
+
+catalog = load_catalog("rest_catalog")
+table = catalog.load_table("db.user_events")
+
+# 1. Scan data as of a specific Snapshot ID
+scanner_snap = table.scan(snapshot_id=890213084920)
+df_snap = scanner_snap.to_arrow() # Reconstruct PyArrow RecordBatch batch
+
+# 2. Inspect active snapshots list to find a timestamp targets
+for snapshot in table.metadata.snapshots:
+    print(f"Snapshot ID: {snapshot.snapshot_id} committed at: {snapshot.timestamp_ms}")</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>

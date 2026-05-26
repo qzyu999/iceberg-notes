@@ -1,0 +1,209 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ACID State Guarantees — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+<script>
+// Inline tab switcher utility
+function switchRecipeTab(recipeId, version) {
+  const container = document.getElementById(`recipe-${recipeId}`);
+  if (!container) return;
+
+  const tabs = container.querySelectorAll(".recipe-tab");
+  tabs.forEach(tab => {
+    if (tab.getAttribute("data-ver") === version) {
+      tab.classList.add("active");
+    } else {
+      tab.classList.remove("active");
+    }
+  });
+
+  const codes = container.querySelectorAll(".recipe-code");
+  codes.forEach(code => {
+    if (code.getAttribute("data-ver") === version) {
+      code.style.display = "block";
+    } else {
+      code.style.display = "none";
+    }
+  });
+}
+</script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Cookbook Recipe 7</div>
+      <h1>ACID State <em>Guarantees</em></h1>
+      <p class="tagline">
+        Deconstructing transactional lock-free mutations, optimistic concurrency conflict detection, and metadata isolation levels.
+      </p>
+    </header>
+
+    <!-- SECTION I: TRANSACTION LAYOUT -->
+    <section id="acid-foundations">
+      <h2>I. The ACID Transaction Model</h2>
+      <p class="sec-desc">
+        Traditional database engines rely on central lock coordinators to guarantee atomic transactions. In distributed cloud object storage, locks are slow and expensive. Apache Iceberg provides full ACID transactions natively using lock-free <strong>optimistic concurrency control (OCC)</strong>.
+      </p>
+
+      <!-- PLAIN ENGLISH CALLOUT -->
+      <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 18px; margin-bottom: 24px; border-left: 4px solid var(--clay);">
+        <div style="font-family: var(--sans); font-size: 13.5px; font-weight: bold; color: var(--slate); margin-bottom: 6px;">
+          💡 ACID in the Lakehouse: The Plain English Concept
+        </div>
+        <div style="font-size: 12.5px; line-height: 1.5; color: var(--g700);">
+          Imagine two writers trying to edit the same online document at the same time:
+          <br>• <strong>Pessimistic Locking</strong> is like forcing a writer to wait outside a locked room until the first writer finishes. This is slow and throttles performance.
+          <br>• <strong>Optimistic Concurrency Control</strong> lets both writers draft their edits in separate, private drafts. When committing:
+          <br>&nbsp;&nbsp;1. The first writer to hit "Publish" succeeds instantly.
+          <br>&nbsp;&nbsp;2. The second writer gets a notice: <em>"A new version was published. We will merge your drafts. If your edits overlap, you must retry."</em>
+          <br>This guarantees that no write conflicts go unnoticed, without ever blocking writers with active locks.
+        </div>
+      </div>
+
+      <h3>1. Mathematical Formulation of OCC Conflict Gating</h3>
+      <p>
+        Let a table commit evolve through a series of metadata snapshots. Let $S_{\text{base}}$ be the initial version at which a transaction begins. Let $\Delta_1$ be the pending changes committed by a concurrent transaction, pushing the table state to $S_{\text{concurrent}}$. Let $\Delta_2$ be our local transaction's changes.
+      </p>
+      <p>
+        During commit, the engine compares the read and write sets to detect overlaps. A conflict exists if the logical files modified by the concurrent transaction overlap with the files read or written by the local transaction:
+      </p>
+
+      <div class="equation-box">
+        <div class="eq-label">Conflict Gating Predicate</div>
+        <div class="eq-math">
+          $$\text{Conflict}(\Delta_1, \Delta_2) \iff \Big( \text{WriteSet}(\Delta_1) \cap \text{ReadSet}(\Delta_2) \neq \emptyset \Big) \lor \Big( \text{WriteSet}(\Delta_1) \cap \text{WriteSet}(\Delta_2) \neq \emptyset \Big)$$
+        </div>
+        <div class="eq-explanation">
+          <strong>The Constraint:</strong> If the intersection ($\cap$) of the files modified concurrently by Transaction 1 and the files evaluated/written by Transaction 2 is non-empty, a conflict is triggered. The catalog aborts Transaction 2, forcing it to rebuild its delta ($\Delta_2$) on top of $S_{\text{concurrent}}$ and retry. If the intersection is empty, the transactions are mathematically independent and both commit successfully.
+        </div>
+      </div>
+
+      <h3>2. Formal Proof: The ACID Proof Rules</h3>
+      <p>
+        Iceberg satisfies the formal properties of ACID through specific metadata invariants:
+      </p>
+
+      <div class="parity-table-container" style="margin-top: 16px; margin-bottom: 24px;">
+        <table class="parity-table" style="width: 100%; font-size: 12.5px; line-height: 1.45;">
+          <thead>
+            <tr>
+              <th style="width: 20%;">ACID Dimension</th>
+              <th style="width: 40%;">Physical Metadata Proof Invariant</th>
+              <th style="width: 40%;">Plain English Translation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Atomicity</strong></td>
+              <td>
+                A snapshot commit is a single pointer atomic swap of the root JSON metadata path:
+                $$TableMetadata_v \xrightarrow{\text{Catalog PUT}} TableMetadata_{v+1}$$
+              </td>
+              <td>Either the entire snapshot commit succeeds and becomes visible globally, or it fails completely. No partial files or intermediate states are ever exposed.</td>
+            </tr>
+            <tr>
+              <td><strong>Consistency</strong></td>
+              <td>
+                All mutations preserve Stable ID constraints:
+                $$\forall id \in \text{Domain}(\Sigma), \quad \text{Type}(id) = \text{stable}$$
+              </td>
+              <td>The schema's structural types cannot mismatch across readers because Iceberg maps column statistics via stable, immutable Field IDs rather than shifting string column names.</td>
+            </tr>
+            <tr>
+              <td><strong>Isolation</strong></td>
+              <td>
+                Supports Snapshot Isolation (SI) and Serializable Snapshot Isolation (SSI) via OCC sequence gating:
+                $$\text{Seq}(d) \le \text{Seq}(f_{\text{pos}})$$
+              </td>
+              <td>Readers scan a completely isolated, static snapshot tree. Concurrent writes remain invisible until their transaction is atomically swapped and registered.</td>
+            </tr>
+            <tr>
+              <td><strong>Durability</strong></td>
+              <td>
+                Physical data files are strictly immutable:
+                $$\text{Content}(f.\text{path}) = \text{constant}$$
+              </td>
+              <td>Once the catalog swap completes, all data and manifest files are locked as immutable cloud objects, guaranteeing permanent durability across cluster crashes.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- WORKFLOW DIAGRAM OR PSEUDO CODE -->
+      <h3>3. The Optimistic Concurrency Control (OCC) Workflow</h3>
+      <p>
+        The following flowchart outlines how the Iceberg catalog coordinates lock-free concurrency checks:
+      </p>
+      <pre style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 16px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--g800); overflow-x: auto;">
+[Transaction Starts] ----> Read current Snapshot ID (e.g. S_base = 10)
+                                 │
+                                 ▼
+                     Draft edits privately (Delta_2)
+                                 │
+                                 ▼
+[Attempt Commit] --------> Query Catalog for latest Snapshot ID (S_latest)
+                                 │
+                   Is S_latest == S_base? (No Concurrent commits)
+                     ├── YES ──> Swap metadata pointer atomically to S_base + 1 (SUCCESS!)
+                     └── NO  ──> Read concurrent modifications (Delta_1)
+                                 │
+                            Check Conflicts:
+                            Does Delta_1 intersect with ReadSet/WriteSet of Delta_2?
+                              ├── YES ──> [ABORT &amp; FAIL] (Throw CommitFailedException)
+                              └── NO  ──> [RESOLVE &amp; RETRY]:
+                                          Rebase S_base = S_latest
+                                          Re-evaluate Delta_2 against S_latest
+                                          Attempt Commit Again!
+      </pre>
+
+      <div class="recipe-container" id="recipe-r7">
+        <div class="recipe-header">
+          <div class="recipe-title-text">Table Properties for Transaction Optimization</div>
+          <div class="recipe-tabs">
+            <button class="recipe-tab active" data-ver="spark" onclick="switchRecipeTab('r7', 'spark')">Spark Transaction Configurations</button>
+            <button class="recipe-tab" data-ver="flink" onclick="switchRecipeTab('r7', 'flink')">Flink Streaming Checkpoints</button>
+          </div>
+        </div>
+        <div class="recipe-code-wrapper">
+          <pre class="recipe-code" data-ver="spark"><code>-- Configure Spark SQL for aggressive commit retries in high-concurrency environments
+ALTER TABLE catalog.db.iceberg_table SET TBLPROPERTIES (
+  'commit.retry.num-retries' = '10',          -- Retry up to 10 times before failing
+  'commit.retry.min-wait-ms' = '100',         -- Backoff at least 100ms
+  'commit.retry.max-wait-ms' = '2000',        -- Cap backoff wait at 2 seconds
+  'history.expire.max-snapshot-age-ms' = '86400000' -- Keep snapshot history for 24 hours
+);</code></pre>
+          <pre class="recipe-code" data-ver="flink" style="display: none;"><code># Flink SQL configuration for low-latency streaming ACID ingestion
+CREATE TABLE flink_iceberg_table (
+  id BIGINT,
+  event_time TIMESTAMP(3)
+) WITH (
+  'connector' = 'iceberg',
+  'catalog-name' = 'rest_catalog',
+  'write.format.default' = 'parquet',
+  'flink.max-continuous-empty-commits' = '5', -- Prevent manifest explosion
+  'write.distribution-mode' = 'hash'          -- Reduce file creation concurrency
+);</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>

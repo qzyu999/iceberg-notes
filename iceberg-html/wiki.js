@@ -415,7 +415,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         { name: "Logical Row Projection", path: "row-projection.html" },
         { name: "COW vs MOR Profiles", path: "performance-profiles.html" },
         { name: "Transaction Semantics", path: "transaction-semantics.html" },
-        { name: "Maintenance & Compaction", path: "maintenance-compaction.html" }
+        { name: "Maintenance & Compaction", path: "maintenance-compaction.html" },
+        { name: "ACID State Guarantees", path: "acid-guarantees.html" },
+        { name: "Hidden Partitioning Spec", path: "hidden-partitioning.html" },
+        { name: "Time-Travel Querying", path: "time-travel.html" }
       ]
     },
     {
