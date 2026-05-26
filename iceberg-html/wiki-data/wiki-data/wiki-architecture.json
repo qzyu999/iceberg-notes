@@ -385,7 +385,7 @@
     },
     "plan-1779594189720": {
       "name": "PyIceberg MoR",
-      "docUrl": "https://docs.google.com/document/d/1pyiceberg_mor_vectorized_reads/edit",
+      "docUrl": "https://docs.google.com/document/d/1QmK4gOYtHsjUFQ96trEvEitTmXu8E04k4a7pgn9WBrA/",
       "docStatus": "drafting",
       "docTldr": "This roadmap outlines high-performance Merge-on-Read (MoR) vectorized reads inside the python bindings. It implements position delete bitmap lookups, lazily mapped segment-level RoaringPositionBitmaps, and PyArrow vectorized filter engines on-the-fly.",
       "docSnippet": "class RoaringPositionBitmap:\n    def __init__(self, buffer: bytes):\n        self.buffer = buffer\n        self.bitmap = RoaringBitmap.deserialize(buffer)\n\n    def contains(self, row_offset: int) -> bool:\n        return row_offset in self.bitmap",
@@ -545,5 +545,5 @@
       }
     }
   },
-  "activePlanId": "plan-1779509761391"
+  "activePlanId": "plan-1779594189720"
 }
