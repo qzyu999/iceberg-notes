@@ -1,0 +1,258 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Column Statistics Spec — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+<script>
+// Inline tab switcher utility
+function switchRecipeTab(recipeId, version) {
+  const container = document.getElementById(`recipe-${recipeId}`);
+  if (!container) return;
+
+  const tabs = container.querySelectorAll(".recipe-tab");
+  tabs.forEach(tab => {
+    if (tab.getAttribute("data-ver") === version) {
+      tab.classList.add("active");
+    } else {
+      tab.classList.remove("active");
+    }
+  });
+
+  const codes = container.querySelectorAll(".recipe-code");
+  codes.forEach(code => {
+    if (code.getAttribute("data-ver") === version) {
+      code.style.display = "block";
+    } else {
+      code.style.display = "none";
+    }
+  });
+}
+</script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Cookbook Recipe 10</div>
+      <h1>Column Statistics &amp; <em>Pruning</em></h1>
+      <p class="tagline">
+        Understanding manifest-level column metadata, formal file-skipping mathematical logic, and Puffin-file index sketches.
+      </p>
+    </header>
+
+    <!-- SECTION I: CORE STATS -->
+    <section id="column-stats-foundations">
+      <h2>I. Manifest-Level Statistics &amp; Pruning</h2>
+      <p class="sec-desc">
+        In traditional data lakes, query engines must open and parse every data file's footer (e.g. Parquet footers) to read basic statistics, which triggers massive network I/O overhead. Apache Iceberg solves this by hoisting vital column-level statistics directly into the binary <strong>Manifest Files (Avro)</strong>. This allows query planners to skip millions of irrelevant data files instantly without making single object storage reads.
+      </p>
+
+      <!-- PLAIN ENGLISH CALLOUT -->
+      <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 18px; margin-bottom: 24px; border-left: 4px solid var(--clay);">
+        <div style="font-family: var(--sans); font-size: 13.5px; font-weight: bold; color: var(--slate); margin-bottom: 6px;">
+          💡 Table Statistics: The Library Card Catalog Analogy
+        </div>
+        <div style="font-size: 12.5px; line-height: 1.5; color: var(--g700);">
+          Imagine searching a physical library for books published strictly between 1920 and 1930:
+          <br>• <strong>Traditional Data Lakes</strong> are like forcing the librarian to walk to the shelves, pick up every single book, open its cover, and check the publication page. This takes hours.
+          <br>• <strong>Iceberg Table Stats</strong> are like checking a drawer-based Card Catalog at the front desk. The card for each bookcase shelf states: <em>"Shelf 12 holds books from years 1950 to 1980"</em>. You instantly know Shelf 12 contains nothing for you, so you completely skip walking to it!
+          <br>Iceberg manifests hold cards containing the minimum, maximum, and null counts for every column, letting readers skip entire physical files without looking inside.
+        </div>
+      </div>
+
+      <h3>1. The Manifest Entry Statistics Schema</h3>
+      <p>
+        Every manifest entry record contains a <code>data_file</code> struct that registers these detailed stats for each column:
+      </p>
+      <ul>
+        <li style="margin-bottom: 6px;"><code>column_sizes</code>: Map from Field ID to physical column size in bytes (essential for cost-based query planning).</li>
+        <li style="margin-bottom: 6px;"><code>value_counts</code>: Map from Field ID to total values written (including nulls and NaNs).</li>
+        <li style="margin-bottom: 6px;"><code>null_value_counts</code>: Map from Field ID to count of null values.</li>
+        <li style="margin-bottom: 6px;"><code>nan_value_counts</code>: Map from Field ID to count of NaN (Not-a-Number) values (highly vital for float/double columns).</li>
+        <li style="margin-bottom: 6px;"><code>lower_bounds</code>: Map from Field ID to binary serialized minimum values.</li>
+        <li style="margin-bottom: 6px;"><code>upper_bounds</code>: Map from Field ID to binary serialized maximum values.</li>
+      </ul>
+
+      <h3>2. Formal Mathematical File Pruning Proofs</h3>
+      <p>
+        Let $f$ be a candidate data file with total records $R_f = f.\text{record\_count}$. Let $c$ be a column corresponding to stable Field ID $i$.
+        The manifest metadata exposes:
+        <br>&nbsp;&nbsp;• Lower bound value: $L_i(f)$
+        <br>&nbsp;&nbsp;• Upper bound value: $U_i(f)$
+        <br>&nbsp;&nbsp;• Null records count: $N_i(f) \in [0, R_f]$
+      </p>
+      <p>
+        During query planning, the reader compiles the query's logical filter predicate into a file-skipping check. We prove mathematically when a file $f$ is pruned:
+      </p>
+
+      <!-- PRUNING EQUATION BOXES -->
+      <div class="equation-box">
+        <div class="eq-label">Proof Rule 1: Constant Comparison Pruning ($c &gt; K$)</div>
+        <div class="eq-math">
+          $$\text{Prune}(f \mid c &gt; K) \iff \Big( U_i(f) \le K \Big) \lor \Big( N_i(f) = R_f \Big)$$
+        </div>
+        <div class="eq-explanation">
+          <strong>In Plain English:</strong> Skip file $f$ if the absolute maximum value stored in the file ($U_i(f)$) is less than or equal to $K$ (meaning no row value can possibly exceed $K$), OR if the entire column is made up of null values (meaning no non-null row exists to satisfy the comparison).
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Proof Rule 2: Constant Comparison Pruning ($c &lt; K$)</div>
+        <div class="eq-math">
+          $$\text{Prune}(f \mid c &lt; K) \iff \Big( L_i(f) \ge K \Big) \lor \Big( N_i(f) = R_f \Big)$$
+        </div>
+        <div class="eq-explanation">
+          <strong>In Plain English:</strong> Skip file $f$ if the absolute minimum value stored in the file ($L_i(f)$) is greater than or equal to $K$ (meaning every single row value is at least $K$), OR if the entire column is completely null.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Proof Rule 3: Exact Equality Pruning ($c = K$)</div>
+        <div class="eq-math">
+          $$\text{Prune}(f \mid c = K) \iff \Big( K &lt; L_i(f) \Big) \lor \Big( K &gt; U_i(f) \Big) \lor \Big( N_i(f) = R_f \Big)$$
+        </div>
+        <div class="eq-explanation">
+          <strong>In Plain English:</strong> Skip file $f$ if the target search key $K$ falls strictly outside the range of values stored in the file (either strictly below the minimum $L_i(f)$ or strictly above the maximum $U_i(f)$), OR if the entire column contains only null values.
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Proof Rule 4: Null Check Pruning (<code>c IS NULL</code>)</div>
+        <div class="eq-math">
+          $$\text{Prune}(f \mid c \text{ IS NULL}) \iff \Big( N_i(f) = 0 \Big)$$
+        </div>
+        <div class="eq-explanation">
+          <strong>In Plain English:</strong> Skip file $f$ if the count of null values in the column ($N_i(f)$) is exactly zero (meaning the column only contains fully populated, non-null values).
+        </div>
+      </div>
+
+      <div class="equation-box">
+        <div class="eq-label">Proof Rule 5: Non-Null Check Pruning (<code>c IS NOT NULL</code>)</div>
+        <div class="eq-math">
+          $$\text{Prune}(f \mid c \text{ IS NOT NULL}) \iff \Big( N_i(f) = R_f \Big)$$
+        </div>
+        <div class="eq-explanation">
+          <strong>In Plain English:</strong> Skip file $f$ if the count of null values in the column ($N_i(f)$) is exactly equal to the total record count ($R_f$) of the file (meaning the column is entirely null).
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION II: PUFFIN FILES -->
+    <section id="puffin-sketches">
+      <h2>II. Puffin Files: Offloading Heavy Statistics</h2>
+      <p class="sec-desc">
+        While min/max boundaries and null counts are small enough to fit inside manifest records, advanced statistics—such as <strong>Bloom Filters</strong> (for set containment checks) and <strong>Theta Sketches</strong> (for counting unique values)—are too massive. Storing them inside manifests would cause metadata bloat.
+        Iceberg solves this by introducing the **Puffin File Specification**, storing heavy statistical structures in separate, highly compressed auxiliary files.
+      </p>
+
+      <h3>1. Mathematical Foundations of sketches</h3>
+      
+      <h4>A. Theta Sketches (Counting Distinct Values - NDV)</h4>
+      <p>
+        To estimate the Number of Distinct Values ($\text{NDV}$) in a massive column without scanning all values, Theta Sketches keep a dynamically binned sample of hash values.
+        Let $U$ be the set of unique values mapped to uniform hashes $h(x) \in [0, 1)$. The sketch retains only hashes less than a threshold parameter $\theta \in (0, 1]$.
+        Let $S = \{ h(x) < \theta \}$ be the binned sample of size $k$.
+      </p>
+      <p>
+        The cardinality of unique values is estimated as:
+        $$\widehat{\text{NDV}} = \frac{k}{\theta}$$
+      </p>
+      <p>
+        As the number of unique records increases, the threshold $\theta$ shrinks dynamically to keep the sample size $k$ fixed, providing an extremely high-accuracy estimate with a tiny $O(k)$ memory footprint.
+      </p>
+
+      <h4>B. Bloom Filters (Set Membership)</h4>
+      <p>
+        A Bloom Filter is a space-efficient probabilistic data structure used to test whether an element is a member of a set. It uses a bitset of $m$ bits and $k$ independent hash functions.
+        The probability of a false positive ($p$) after inserting $n$ elements into a filter of $m$ bits using $k$ optimal hash functions is:
+        $$p \approx \left(1 - e^{-kn/m}\right)^k$$
+      </p>
+      <p>
+        To minimize the false-positive rate for a targeted size $n$, the optimum number of hash functions is:
+        $$k = \frac{m}{n} \ln 2$$
+      </p>
+
+      <h3>2. Puffin File Structural Layout</h3>
+      <p>
+        A **Puffin file** consists of a serialized header, followed by multiple independent payload blocks (holding individual Bloom Filters or Theta Sketches), and a trailing index footer:
+      </p>
+
+      <pre style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 16px; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: var(--g800); overflow-x: auto;">
++-----------------------------------------------------------------------------------+
+|                                 PUFFIN FILE LAYOUT                                |
++-----------------------------------------------------------------------------------+
+| Offset (Bytes)  | Field Name          | Data Type     | Description               |
++-----------------+---------------------+---------------+---------------------------+
+| 0 - 3           | Magic Bytes         | byte[4]       | 'P', 'U', 'F', '1'        |
++-----------------+---------------------+---------------+---------------------------+
+| 4 - ...         | Payload Block 1     | binary        | Blob containing Bloom Fil. |
++-----------------+---------------------+---------------+---------------------------+
+| ...             | Payload Block 2     | binary        | Blob containing Theta Ske.|
++-----------------+---------------------+---------------+---------------------------+
+| Footer Offset   | File Footer (JSON)  | UTF-8 String  | Lists all block offsets,  |
+|                 |                     |               | column IDs, and types     |
++-----------------+---------------------+---------------+---------------------------+
+| Length - 4      | Footer Length       | uint32 (BE)   | Size of JSON footer       |
++-----------------+---------------------+---------------+---------------------------+
+| Length          | Magic Bytes         | byte[4]       | 'P', 'U', 'F', '1'        |
++-----------------+---------------------+---------------+---------------------------+
+      </pre>
+
+      <div class="recipe-container" id="recipe-r10">
+        <div class="recipe-header">
+          <div class="recipe-title-text">Table Properties for Advanced Stats</div>
+          <div class="recipe-tabs">
+            <button class="recipe-tab active" data-ver="puffin" onclick="switchRecipeTab('r10', 'puffin')">Writing Puffin NDV Stats</button>
+            <button class="recipe-tab" data-ver="pyiceberg" onclick="switchRecipeTab('r10', 'pyiceberg')">PyIceberg Stats Inspector</button>
+          </div>
+        </div>
+        <div class="recipe-code-wrapper">
+          <pre class="recipe-code" data-ver="puffin"><code>-- Enable writing Puffin NDV Theta Sketches and Bloom Filters in Spark SQL
+ALTER TABLE catalog.db.user_events SET TBLPROPERTIES (
+  'write.meta.ndv-theta.enabled' = 'true',      -- Enable Theta Sketches
+  'write.bloom-filter.enabled.column.id' = 'true', -- Enable Bloom Filter for ID column
+  'write.bloom-filter.fpp.column.id' = '0.05'     -- Target 5% false-positive probability
+);
+
+-- Analyze table to build and persist advanced Puffin statistics
+ANALYZE TABLE catalog.db.user_events COMPUTE STATISTICS FOR ALL COLUMNS;</code></pre>
+          <pre class="recipe-code" data-ver="pyiceberg" style="display: none;"><code># Programmatic inspection of manifest-level column statistics using PyIceberg
+from pyiceberg.catalog import load_catalog
+
+catalog = load_catalog("rest_catalog")
+table = catalog.load_table("db.user_events")
+
+# Inspect the latest snapshot manifest entries to read column bounds
+snapshot = table.current_snapshot()
+manifests = snapshot.manifests(table.io)
+
+for manifest in manifests:
+    for entry in manifest.fetch_entries(table.io):
+        data_file = entry.data_file
+        print(f"File: {data_file.file_path}")
+        print(f"  Total Rows: {data_file.record_count}")
+        print(f"  Null Counts: {data_file.null_value_counts}")
+        print(f"  Lower Bounds: {data_file.lower_bounds}")
+        print(f"  Upper Bounds: {data_file.upper_bounds}")</code></pre>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>

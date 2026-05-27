@@ -418,7 +418,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         { name: "Maintenance & Compaction", path: "maintenance-compaction.html" },
         { name: "ACID State Guarantees", path: "acid-guarantees.html" },
         { name: "Hidden Partitioning Spec", path: "hidden-partitioning.html" },
-        { name: "Time-Travel Querying", path: "time-travel.html" }
+        { name: "Time-Travel Querying", path: "time-travel.html" },
+        { name: "Column Statistics Spec", path: "column-statistics.html" }
       ]
     },
     {
