@@ -419,7 +419,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         { name: "ACID State Guarantees", path: "acid-guarantees.html" },
         { name: "Hidden Partitioning Spec", path: "hidden-partitioning.html" },
         { name: "Time-Travel Querying", path: "time-travel.html" },
-        { name: "Column Statistics Spec", path: "column-statistics.html" }
+        { name: "Column Statistics Spec", path: "column-statistics.html" },
+        { name: "Layered Architecture Spec", path: "layer-architecture.html" }
       ]
     },
     {

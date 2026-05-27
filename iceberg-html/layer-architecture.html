@@ -1,0 +1,506 @@
+<!-- Copyright 2026 Apache Iceberg Community · SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layered Architecture Spec — The Iceberg Cookbook</title>
+<link rel="stylesheet" href="wiki.css">
+<!-- Load KaTeX for high-performance LaTeX rendering in browser -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+<script src="wiki.js" defer></script>
+<script>
+// Inline tab switcher utility
+function switchRecipeTab(recipeId, version) {
+  const container = document.getElementById(`recipe-${recipeId}`);
+  if (!container) return;
+
+  const tabs = container.querySelectorAll(".recipe-tab");
+  tabs.forEach(tab => {
+    if (tab.getAttribute("data-ver") === version) {
+      tab.classList.add("active");
+    } else {
+      tab.classList.remove("active");
+    }
+  });
+
+  const codes = container.querySelectorAll(".recipe-code");
+  codes.forEach(code => {
+    if (code.getAttribute("data-ver") === version) {
+      code.style.display = "block";
+    } else {
+      code.style.display = "none";
+    }
+  });
+}
+</script>
+</head>
+<body>
+<div class="wiki-layout">
+
+  <!-- Sidebar Component (Dynamically populated by wiki.js) -->
+  <aside class="wiki-sidebar"></aside>
+
+  <!-- Core Content Area -->
+  <main class="wiki-content">
+    
+    <header style="border-bottom: 1.5px solid var(--g300); padding-bottom: 24px; margin-bottom: 32px;">
+      <div class="eyebrow">Cookbook Recipe 11</div>
+      <h1>Layered Architecture &amp; <em>Coordination</em></h1>
+      <p class="tagline">
+        An exhaustive, under-the-hood analysis of the Catalog, Metadata, and Data layers, tracing the execution paths of distributed queries and transactional writes.
+      </p>
+    </header>
+
+    <!-- SECTION I: THREE TIERS -->
+    <section id="layered-architecture">
+      <h2>I. The Three-Tier Architectural Specification</h2>
+      <p class="sec-desc">
+        Apache Iceberg is structured into three strictly decoupled layers: the <strong>Catalog Layer</strong>, the <strong>Metadata Layer</strong>, and the <strong>Data Layer</strong>. This modular design isolates catalog tracking from physical indexing, enabling lock-free transactional edits, schema/partition evolution without rewrites, and massively parallelized queries across multiple computing engines.
+      </p>
+
+      <!-- PLAIN ENGLISH CALLOUT -->
+      <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 18px; margin-bottom: 24px; border-left: 4px solid var(--clay);">
+        <div style="font-family: var(--sans); font-size: 13.5px; font-weight: bold; color: var(--slate); margin-bottom: 6px;">
+          💡 Table Layers: The Real Estate Registry Analogy
+        </div>
+        <div style="font-size: 12.5px; line-height: 1.5; color: var(--g700);">
+          Imagine buying and owning a parcel of land in a city:
+          <br>• <strong>The Catalog Layer (The Land Registry Office):</strong> This is the central city hall registry containing a single book. The book maps a parcel number (table ID) to a specific ledger ID. City hall does not hold the actual land or blueprints—it only coordinates ownership swaps atomically.
+          <br>• <strong>The Metadata Layer (The Blueprints &amp; Surveys):</strong> This is the detailed surveyor ledger. It does not contain the dirt or grass itself. Instead, it holds precise mathematical maps, bounding boxes, and list addresses specifying exactly where the fence lines are located.
+          <br>• <strong>The Data Layer (The Physical Land):</strong> The actual physical soil, grass, and trees residing at the physical GPS coordinates in the ground (the raw Parquet files in S3).
+          <br>When a building inspector (query engine) scans the land, they first get the survey ID from city hall (Catalog), read the boundary maps (Metadata), and then walk directly to the physical soil blocks (Data).
+        </div>
+      </div>
+
+      <div class="parity-table-container" style="margin-top: 16px; margin-bottom: 24px;">
+        <table class="parity-table" style="width: 100%; font-size: 12.5px; line-height: 1.45;">
+          <thead>
+            <tr>
+              <th style="width: 20%;">Architectural Layer</th>
+              <th style="width: 35%;">Key Components &amp; Specifications</th>
+              <th style="width: 45%;">Responsibility &amp; Operational Mechanics</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>1. Catalog Layer</strong></td>
+              <td>
+                • Table identifier mappings (e.g. <code>db.table</code>)
+                <br>• Root metadata pointer registry
+                <br>• Connectors: REST, JDBC, Hive Metastore, AWS Glue, Nessie
+              </td>
+              <td>
+                Guarantees **Atomicity (A)**. Tracks the absolute current state of the table by storing a single pointer to the active Metadata JSON file. Coordinates optimistic concurrency control conditional swaps.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>2. Metadata Layer</strong></td>
+              <td>
+                • Metadata JSON (Root Pointer)
+                <br>• Manifest Lists (Avro)
+                <br>• Manifest Files (Avro)
+              </td>
+              <td>
+                Indexes files and maintains **Consistency (C)** and **Isolation (I)**.
+                <br>• <strong>Metadata JSON:</strong> Tracks table history, schema list, and active snapshots.
+                <br>• <strong>Manifest List:</strong> Tracks active manifest files, commit sequences, and partition ranges.
+                <br>• <strong>Manifest File:</strong> Indexes physical data/delete files and records column statistics.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>3. Data Layer</strong></td>
+              <td>
+                • DATA files (Parquet, ORC, Avro)
+                <br>• DELETE log files (positional/equality)
+                <br>• Puffin files (Bloom Filters, NDV sketches)
+              </td>
+              <td>
+                Stores the physical raw data records and deletion vectors securely in distributed object storage. Guarantees **Durability (D)** through strict physical file immutability.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SECTION II: EXECUTION PATHS -->
+    <section id="coordination-paths">
+      <h2>II. The Detailed Coordination Paths</h2>
+      
+      <h3>1. The Read Execution Path (Querying Data)</h3>
+      <p>
+        When an engine (like Spark, Trino, or PyIceberg) executes a query (e.g. <code>SELECT * FROM db.events WHERE timestamp &gt;= '2026-05-25'</code>), it coordinates across the three layers:
+      </p>
+      <ol style="line-height: 1.6; font-size: 13.5px; color: var(--g800);">
+        <li style="margin-bottom: 8px;">
+          <strong>Catalog Resolution:</strong> The engine contacts the **Catalog** (e.g. REST Catalog) with the table identifier <code>db.events</code>. The catalog responds with the URI of the current root metadata file: <code style="font-family: var(--mono); font-size: 11.5px;">s3://bucket/metadata/v4.metadata.json</code>.
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Metadata Root Parsing:</strong> The engine reads the **Metadata JSON** from S3. It parses the schema, active partition specs, and finds the current Snapshot ID (e.g. <code>snap_804</code>) and its corresponding **Manifest List** Avro file path.
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Manifest List Filtering (Manifest Pruning):</strong> The engine reads the **Manifest List**. It evaluates each manifest file entry record. Since the manifest list annotates each manifest with its partition value bounds, the engine skips any manifest files whose partitions do not overlap with our query filter (Hour/Day Partition Pruning).
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Manifest File Parsing (File Pruning):</strong> The engine reads the remaining **Manifest Files** in parallel. It evaluates each manifest entry. Using the column minimum, maximum, and null counts stored in each manifest entry, the engine skips individual data files that cannot mathematically contain matching rows (Column Statistics Pruning).
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Physical Data Reading:</strong> The engine receives a highly refined list of physical data file paths (e.g., <code>data-01.parquet</code>, <code>data-02.parquet</code>). It bypasses all metadata layers and reads the raw row blocks directly from the **Data Layer** (cloud storage), splitting the files into parallel task threads.
+        </li>
+      </ol>
+
+      <h3>2. The Write Execution Path (Atomic Commits &amp; Retries)</h3>
+      <p>
+        When an ingestion writer appends new records, it coordinates across the layers to write new files and swap state pointers atomically:
+      </p>
+      <ol style="line-height: 1.6; font-size: 13.5px; color: var(--g800);">
+        <li style="margin-bottom: 8px;">
+          <strong>Data File Ingest:</strong> The writer engine streams input rows, buckets them according to the active partition spec, and writes brand-new, immutable Parquet files directly to the **Data Layer** (cloud storage).
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Manifest Serialization:</strong> The writer compiles the paths, row counts, and detailed column-level min/max statistics of the newly written files, and serializes a new **Manifest File** (Avro) containing these entries, marked with <code>status = 1 (ADDED)</code>.
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Manifest List Synthesis:</strong> The writer creates a new **Manifest List** file. It copies all manifest pointers from the previous active snapshot, and appends a pointer to the newly created manifest file.
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Metadata Root Generation:</strong> The writer generates a new root **Metadata JSON** file (e.g., <code>v5.metadata.json</code>). This file registers the new snapshot ID, links it to our new Manifest List, appends it to the table history array, and updates the active snapshot pointer.
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Atomic Catalog Swap (OCC):</strong> The writer attempts to register the new root pointer in the **Catalog Layer** by requesting a conditional atomic update: <em>"Swap <code>db.events</code> pointer from <code>v4.metadata.json</code> to <code>v5.metadata.json</code> if and only if the current pointer is still <code>v4.metadata.json</code>."</em>
+        </li>
+        <li style="margin-bottom: 8px;">
+          <strong>Conflict Resolution &amp; Rebase:</strong> If a concurrent transaction committed <code>v5.metadata.json</code> first, the catalog conditional swap fails. The writer reads the new <code>v5.metadata.json</code> to detect conflicts. If no overlaps exist (e.g. the concurrent transaction appended to partition B while we appended to partition A), the writer rebases: it rebuilds its manifest list and metadata JSON on top of <code>v5.metadata.json</code> and attempts to commit again as <code>v6.metadata.json</code>!
+        </li>
+      </ol>
+    </section>
+
+    <!-- SECTION III: COORDINATION MAP -->
+    <section id="coordination-map">
+      <h2>III. Technical Architecture Coordination Flow</h2>
+      <p>
+        The diagram below visualizes the physical-to-logical coordination path across the three layers during a query scan:
+      </p>
+
+      <pre style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 20px; font-family: var(--mono); font-size: 11.5px; line-height: 1.45; color: var(--g800); overflow-x: auto;">
+[CATALOG LAYER]                  1. Get Root Pointer (db.events)
+  REST Catalog   ───────────────> [ Returns s3://bucket/metadata/v4.metadata.json ]
+                                       │
+                                       ▼  2. Read active Snapshot metadata
+[METADATA LAYER]                 v4.metadata.json
+                                  ├── Current Snapshot ID: 890213
+                                  └── Manifest List: snap-8902.manifest-list.avro
+                                       │
+                                       ▼  3. Read manifests &amp; prune partition ranges
+                                 snap-8902.manifest-list.avro
+                                  ├── Manifest A: partition_x=[1, 5] (Matches filter! ✅)
+                                  └── Manifest B: partition_x=[6, 10] (Pruned! ❌)
+                                       │
+                                       ▼  4. Read manifest entries &amp; prune column ranges
+                                 manifest-A.avro (Manifest File)
+                                  ├── Entry 1: data-001.parquet [min=10, max=50] (Matches! ✅)
+                                  └── Entry 2: data-002.parquet [min=60, max=90] (Pruned! ❌)
+                                       │
+                                       ▼  5. Read physical data blocks directly
+[DATA LAYER]                     data-001.parquet (Physical DATA File on S3)
+                                  └── Row 0: (id=12, val="Active Record")
+      </pre>
+    </section>
+
+    <!-- SECTION IV: CODE SIMULATOR -->
+    <section id="layered-simulator">
+      <h2>IV. Comprehensive Layer Coordination Simulator</h2>
+      <p>
+        The following complete, self-contained Python program simulates the entire three-tier architecture of an Iceberg table, tracing how the Catalog, Metadata, and Data layers cooperate to execute isolated scans and resolve write conflicts under optimistic concurrency control (OCC):
+      </p>
+
+      <div style="background: var(--paper); border: 1.5px solid var(--g300); border-radius: 8px; padding: 16px; margin-bottom: 24px; overflow: hidden;">
+        <pre style="margin: 0; font-family: var(--mono); font-size: 11.5px; line-height: 1.45; overflow-x: auto; color: var(--g800);"><code>import time
+from typing import List, Dict, Any, Tuple
+
+# =====================================================================
+# DATA LAYER: Simulates physical storage files on S3
+# =====================================================================
+class DataFile:
+    def __init__(self, path: str, partition_val: int, records: List[Dict[str, Any]], col_min: int, col_max: int):
+        self.path = path
+        self.partition_val = partition_val
+        self.records = records
+        self.record_count = len(records)
+        self.col_min = col_min
+        self.col_max = col_max
+
+class S3StorageBucket:
+    def __init__(self):
+        self.objects: Dict[str, Any] = {}
+
+    def write(self, path: str, payload: Any):
+        self.objects[path] = payload
+        print(f"  [S3 WRITE] {path}")
+
+    def read(self, path: str) -> Any:
+        if path not in self.objects:
+            raise FileNotFoundError(f"S3 Object not found at {path}")
+        return self.objects[path]
+
+# =====================================================================
+# METADATA LAYER: Indexes, Manifests, and Metadata JSONs
+# =====================================================================
+class ManifestEntry:
+    def __init__(self, status: int, sequence_number: int, data_file: DataFile):
+        self.status = status # 0: EXISTING, 1: ADDED, 2: DELETED
+        self.sequence_number = sequence_number
+        self.data_file = data_file
+
+class ManifestFile:
+    def __init__(self, path: str, entries: List[ManifestEntry], min_partition: int, max_partition: int):
+        self.path = path
+        self.entries = entries
+        self.min_partition = min_partition
+        self.max_partition = max_partition
+
+class ManifestList:
+    def __init__(self, manifest_files: List[ManifestFile]):
+        self.manifest_files = manifest_files
+
+class TableMetadataJSON:
+    def __init__(self, format_version: int, current_snapshot_id: int, snapshot_history: List[Dict[str, Any]]):
+        self.format_version = format_version
+        self.current_snapshot_id = current_snapshot_id
+        self.snapshots = snapshot_history # Maps snapshot_id -> manifest_list_path
+
+# =====================================================================
+# CATALOG LAYER: Maps table IDs to root pointers with atomic swaps
+# =====================================================================
+class RESTCatalog:
+    def __init__(self, s3_bucket: S3StorageBucket):
+        self.s3_bucket = s3_bucket
+        self.table_registry: Dict[str, str] = {} # table_id -> current_metadata_path
+        self.version_counters: Dict[str, int] = {} # table_id -> version count
+
+    def register_table(self, table_id: str, metadata_path: str):
+        self.table_registry[table_id] = metadata_path
+        self.version_counters[table_id] = 1
+
+    def get_table_root_pointer(self, table_id: str) -> str:
+        if table_id not in self.table_registry:
+            raise KeyError(f"Table {table_id} is not registered in catalog.")
+        return self.table_registry[table_id]
+
+    def commit_swap(self, table_id: str, expected_path: str, new_path: str) -> bool:
+        """Simulates atomic conditional check-and-put swap (OCC)."""
+        current = self.table_registry.get(table_id)
+        if current != expected_path:
+            # Concurrency conflict detected! Expected old version is stale
+            print(f"  [CATALOG REJECT] Expected base '{expected_path}' but registry has evolved to '{current}'!")
+            return False
+            
+        # Atomic swap succeeds
+        self.table_registry[table_id] = new_path
+        self.version_counters[table_id] += 1
+        print(f"  [CATALOG SWAP SUCCESS] {table_id} pointer swapped atomically to: {new_path}")
+        return True
+
+# =====================================================================
+# COORDINATOR: Simulates Reader/Writer Query Engines
+# =====================================================================
+class IcebergEngineCoordinator:
+    def __init__(self, catalog: RESTCatalog, s3_bucket: S3StorageBucket, table_id: str):
+        self.catalog = catalog
+        self.s3_bucket = s3_bucket
+        self.table_id = table_id
+
+    def execute_query(self, filter_partition: int, filter_key_min: int) -> List[Dict[str, Any]]:
+        """
+        Simulates the entire READ coordination path:
+        Catalog -> Metadata JSON -> Manifest List -> Manifest -> Data File
+        """
+        print(f"\n--- Starting Read Scan for '{self.table_id}' where partition={filter_partition} and ID >= {filter_key_min} ---")
+        
+        # 1. Resolve Root Pointer from Catalog Layer
+        root_metadata_path = self.catalog.get_table_root_pointer(self.table_id)
+        print(f"Step 1: Catalog resolved table ID to root path: {root_metadata_path}")
+        
+        # 2. Parse Metadata JSON
+        meta: TableMetadataJSON = self.s3_bucket.read(root_metadata_path)
+        print(f"Step 2: Read Metadata JSON. Current Snapshot ID: {meta.current_snapshot_id}")
+        
+        # Resolve active snapshot manifest list path
+        manifest_list_path = next(
+            snap["manifest_list"] for snap in meta.snapshots if snap["id"] == meta.current_snapshot_id
+        )
+        
+        # 3. Parse and Prune Manifest List
+        manifest_list: ManifestList = self.s3_bucket.read(manifest_list_path)
+        print(f"Step 3: Read Manifest List containing {len(manifest_list.manifest_files)} manifest paths.")
+        
+        active_manifests: List[ManifestFile] = []
+        for m_file in manifest_list.manifest_files:
+            # Check partition pruning
+            if m_file.min_partition <= filter_partition <= m_file.max_partition:
+                print(f"  - Manifest '{m_file.path}' matches partition filter [{m_file.min_partition}, {m_file.max_partition}]. ✅")
+                active_manifests.append(m_file)
+            else:
+                print(f"  - Manifest '{m_file.path}' bounds [{m_file.min_partition}, {m_file.max_partition}] do not match. Pruned! ❌")
+        
+        # 4. Parse Manifest Files and evaluate Column Stats
+        print("Step 4: Evaluating manifest entries and column statistics bounds...")
+        files_to_read: List[DataFile] = []
+        
+        for manifest in active_manifests:
+            for entry in manifest.entries:
+                if entry.status == 2: # Deleted
+                    continue
+                d_file = entry.data_file
+                # Check column statistics bounds pruning
+                if d_file.col_max >= filter_key_min:
+                    print(f"  - File '{d_file.path}' has max key {d_file.col_max} >= filter {filter_key_min}. Matches! ✅")
+                    files_to_read.append(d_file)
+                else:
+                    print(f"  - File '{d_file.path}' has max key {d_file.col_max} < filter {filter_key_min}. Pruned! ❌")
+                    
+        # 5. Read physical data files directly from Data Layer
+        print(f"Step 5: Reading raw rows from {len(files_to_read)} matched physical data files directly.")
+        final_rows = []
+        for df in files_to_read:
+            # Evaluate records
+            for record in df.records:
+                if record["id"] >= filter_key_min:
+                    final_rows.append(record)
+                    
+        print(f"Scan complete. Retained {len(final_rows)} active rows.")
+        return final_rows
+
+    def execute_write_append(self, partition_val: int, raw_records: List[Dict[str, Any]], col_min: int, col_max: int):
+        """
+        Simulates the entire WRITE coordination path with OCC retry loops:
+        Data Append -> Manifest -> Manifest List -> Metadata JSON -> Catalog atomic swap
+        """
+        print(f"\n--- Starting Transaction Append for '{self.table_id}' (Partition={partition_val}) ---")
+        
+        retry_count = 0
+        max_retries = 3
+        
+        while retry_count < max_retries:
+            # Read current base path
+            base_metadata_path = self.catalog.get_table_root_pointer(self.table_id)
+            meta: TableMetadataJSON = self.s3_bucket.read(base_metadata_path)
+            
+            # Step 1: Write raw data files directly to Data Layer
+            file_id = int(time.time() * 1000)
+            data_path = f"s3://bucket/data/partition_x={partition_val}/data_{file_id}.parquet"
+            data_file = DataFile(data_path, partition_val, raw_records, col_min, col_max)
+            self.s3_bucket.write(data_path, data_file)
+            
+            # Step 2: Write new manifest indexing our data file
+            manifest_path = f"s3://bucket/metadata/manifest_{file_id}.avro"
+            entry = ManifestEntry(status=1, sequence_number=meta.current_snapshot_id + 1, data_file=data_file)
+            new_manifest = ManifestFile(manifest_path, [entry], partition_val, partition_val)
+            self.s3_bucket.write(manifest_path, new_manifest)
+            
+            # Step 3: Synthesis new manifest list combining old manifest list and our new manifest
+            base_snap_list_path = next(
+                snap["manifest_list"] for snap in meta.snapshots if snap["id"] == meta.current_snapshot_id
+            )
+            base_snap_list: ManifestList = self.s3_bucket.read(base_snap_list_path)
+            
+            new_snap_list_path = f"s3://bucket/metadata/snap_{file_id}.manifest-list.avro"
+            new_manifest_list = ManifestList(base_snap_list.manifest_files + [new_manifest])
+            self.s3_bucket.write(new_snap_list_path, new_manifest_list)
+            
+            # Step 4: Write new root Metadata JSON
+            new_snapshot_id = meta.current_snapshot_id + 1
+            new_history = meta.snapshots + [{"id": new_snapshot_id, "manifest_list": new_snap_list_path}]
+            
+            new_meta_path = f"s3://bucket/metadata/v{new_snapshot_id}.metadata.json"
+            new_metadata = TableMetadataJSON(format_version=2, current_snapshot_id=new_snapshot_id, snapshot_history=new_history)
+            self.s3_bucket.write(new_meta_path, new_metadata)
+            
+            # Step 5: Attempt atomic pointer swap in Catalog Layer
+            print("Step 5: Attempting atomic conditional commit swap in catalog...")
+            success = self.catalog.commit_swap(self.table_id, base_metadata_path, new_meta_path)
+            
+            if success:
+                print("Commit Transaction completed successfully!")
+                return
+            else:
+                # Concurrent write collided! Increment retry count and loop
+                retry_count += 1
+                print(f"  [REBUILD & RETRY] Re-attempting ingest. Retry cycle: {retry_count}/{max_retries}")
+                time.sleep(0.1)
+                
+        raise RuntimeError("Append transaction aborted after exceeding maximum concurrency retries.")
+
+# =====================================================================
+# Walkthrough Verification
+# =====================================================================
+if __name__ == "__main__":
+    # Initialize physical storage and catalog layers
+    s3 = S3StorageBucket()
+    catalog = RESTCatalog(s3)
+    
+    # 1. Setup Base Table (Snapshot ID 1) containing initial users
+    # Data Layer: data_1.parquet (partition 1, keys 1-10)
+    data1_records = [{"id": 1, "name": "Alice"}, {"id": 10, "name": "Bob"}]
+    data_file_1 = DataFile("s3://bucket/data/partition_x=1/data_1.parquet", 1, data1_records, 1, 10)
+    s3.write(data_file_1.path, data_file_1)
+    
+    # Metadata Layer: manifest_1.avro indexing data_file_1
+    manifest_1 = ManifestFile("s3://bucket/metadata/manifest_1.avro", [ManifestEntry(0, 1, data_file_1)], 1, 1)
+    s3.write(manifest_1.path, manifest_1)
+    
+    # Metadata Layer: snap_1 manifest list
+    snap_list_1 = ManifestList([manifest_1])
+    s3.write("s3://bucket/metadata/snap_1.manifest-list.avro", snap_list_1)
+    
+    # Metadata Layer: v1.metadata.json
+    root_metadata = TableMetadataJSON(
+        format_version=2, 
+        current_snapshot_id=1, 
+        snapshot_history=[{"id": 1, "manifest_list": "s3://bucket/metadata/snap_1.manifest-list.avro"}]
+    )
+    s3.write("s3://bucket/metadata/v1.metadata.json", root_metadata)
+    
+    # Catalog Layer: Register table pointer
+    catalog.register_table("db.user_events", "s3://bucket/metadata/v1.metadata.json")
+    
+    # Initialize Engine coordinator
+    engine = IcebergEngineCoordinator(catalog, s3, "db.user_events")
+    
+    # Verify Read Path (prunes non-matching ranges)
+    # Search for partition=1 and ID >= 5 (Should read data_1.parquet)
+    engine.execute_query(filter_partition=1, filter_key_min=5)
+    
+    # Verify Write Path Ingestion (Snapshot ID 2)
+    # Appends new record Charlie in partition 1, keys 15-15
+    engine.execute_write_append(1, [{"id": 15, "name": "Charlie"}], 15, 15)
+    
+    # Re-run Read Path (Should read both data_1 and data_2 parquet files)
+    engine.execute_query(filter_partition=1, filter_key_min=5)
+    
+    # Simulate a concurrent collision retry loop!
+    print("\n--- Simulating Concurrency Collision Loop ---")
+    # We trigger two concurrent appends on the table.
+    # The first append starts, then a second concurrent append commits, causing the first to rebase and retry.
+    import threading
+    
+    def append_david():
+        time.sleep(0.05) # Delay slightly
+        engine.execute_write_append(2, [{"id": 20, "name": "David"}], 20, 20)
+        
+    def append_eve():
+        engine.execute_write_append(2, [{"id": 30, "name": "Eve"}], 30, 30)
+
+    t1 = threading.Thread(target=append_david)
+    t2 = threading.Thread(target=append_eve)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    
+    # Final Table Scan to verify all concurrent records survived
+    engine.execute_query(filter_partition=2, filter_key_min=10)</code></pre>
+      </div>
