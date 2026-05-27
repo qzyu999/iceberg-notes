@@ -1,5 +1,18 @@
 [
   {
+    "number": "2604",
+    "title": "Remove deleted data files with expire_snapshots",
+    "type": "issue",
+    "state": "open",
+    "stateReason": null,
+    "binding": "python",
+    "author": "Anton-Tarazi",
+    "body": "### Feature Request / Improvement\n\nRunning an expire snapshots operation will only rewrite the metadata file without the expired snapshots (and refs/ statistics). It does not delete deleted data files referenced only by the expired snapshots. This can be observed by deleting an entire table and calling `expire_snapshots` - the data files still exist. Trino and spark both clean up deleted data files when all snapshots referencing them are expired. \n\nFrom the spec:\n```\nWhen a file is replaced or deleted from the dataset, its manifest entry fields store the snapshot ID \nin which the file was deleted and status 2 (deleted). The file may be deleted from the file system \nwhen the snapshot in which it was deleted is garbage collected, assuming that older snapshots \nhave also been garbage collected [1].\n...\n1. Technically, data files can be deleted when the last snapshot that contains the file as “live” data is \ngarbage collected. But this is harder to detect and requires finding the diff of multiple snapshots. It \nis easier to track what files are deleted in a snapshot and delete them when that snapshot expires. \nIt is not recommended to add a deleted file back to a table. Adding a deleted file can lead to edge \ncases where incremental deletes can break table snapshots.\n```\n\nHappy to work on this if others agree that it should be added :) ",
+    "url": "https://github.com/apache/iceberg-python/issues/2604",
+    "incoming": [],
+    "outgoing": []
+  },
+  {
     "number": "2193",
     "title": "Add RoaringPositionBitmap",
     "type": "pr",
