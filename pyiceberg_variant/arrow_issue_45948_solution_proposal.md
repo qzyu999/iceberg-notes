@@ -279,9 +279,9 @@ graph TB
         end
 
         subgraph "Layer 1: Shredding Engine (NEW)"
-            SHRED[VariantShredder<br/>shred_variant_column()]
-            UNSHRED[VariantReconstructor<br/>reconstruct_variant_column()]
-            SCHEMA[VariantShreddingSchema<br/>schema inference + evolution]
+            SHRED["VariantShredder<br/>shred_variant_column()"]
+            UNSHRED["VariantReconstructor<br/>reconstruct_variant_column()"]
+            SCHEMA["VariantShreddingSchema<br/>schema inference + evolution"]
         end
 
         subgraph "Layer 2: Extension Type (parquet_variant.h)"
