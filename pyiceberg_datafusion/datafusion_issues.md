@@ -77,13 +77,27 @@ Add a new `execution` submodule to the `pyiceberg-core` Rust bindings (`bindings
 use datafusion::prelude::*;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 
+/// Default batch size for DataFusion execution.
+/// Matches DataFusion's own default (8192 rows per RecordBatch).
+/// This balances per-batch overhead against memory granularity.
+const DEFAULT_BATCH_SIZE: usize = 8192;
+
+/// Memory utilization factor for spill threshold.
+/// At 1.0, the pool spills only when the hard limit is hit.
+/// Lower values (e.g., 0.8) leave headroom for framework overhead.
+const MEMORY_POOL_FRACTION: f64 = 1.0;
+
 fn create_bounded_session(memory_limit_bytes: usize) -> SessionContext {
+    let target_partitions = std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(1);
+
     let config = SessionConfig::new()
-        .with_batch_size(8192)
-        .with_target_partitions(num_cpus::get());
+        .with_batch_size(DEFAULT_BATCH_SIZE)
+        .with_target_partitions(target_partitions);
     
     let runtime = RuntimeEnvBuilder::new()
-        .with_memory_limit(memory_limit_bytes, 1.0)
+        .with_memory_limit(memory_limit_bytes, MEMORY_POOL_FRACTION)
         .with_disk_manager(DiskManagerConfig::new())
         .build_arc()
         .unwrap();
@@ -105,6 +119,68 @@ fn execute_compaction(...) -> PyResult<CompactionResult> { ... }
 | Track 1 (Python DF) | Partially | Can start with `datafusion-python` directly; this module provides the optimized path |
 | Track 2 (Rust DF) | Yes — this IS Track 2 | Full execution in Rust below the GIL |
 | PyArrow Fallback | N/A | This module is only called when DataFusion is chosen |
+
+### Python-Side Developer API
+
+The Rust module is an implementation detail. Users never import it directly. Instead, the parameters surface through the **Table method signatures** — a DuckDB-style UX where the user configures *what* they want, not *how* it runs:
+
+```python
+# User-facing API — this is all they see:
+table.compact(memory_limit="512MB")
+table.delete("status = 'expired'", memory_limit="1GB")
+table.upsert(df, join_cols=["id"], memory_limit="2GB")
+
+# The memory_limit flows through internally:
+#   Table.compact(memory_limit="512MB")
+#     → resolve_engine("compact")  → DATAFUSION
+#       → pyiceberg_core.execution.execute_compaction(..., memory_limit="512MB")
+#         → create_bounded_session(parse_memory("512MB"))
+#           → FairSpillPool(536_870_912 bytes)
+```
+
+**Default behavior** (zero-config):
+
+```python
+# No memory_limit specified → uses a sensible default
+table.compact()  # defaults to "512MB" (or reads from table property / pyiceberg config)
+```
+
+**Configuration hierarchy** (highest priority wins):
+
+```python
+# 1. Method argument (highest priority)
+table.compact(memory_limit="2GB")
+
+# 2. Table property
+# SET IN TABLE: write.execution.memory-limit = 1GB
+
+# 3. PyIceberg config (~/.pyiceberg.yaml)
+# execution:
+#   memory-limit: 512MB
+
+# 4. Built-in default: 512MB
+```
+
+**The key principle**: the user never sees `SessionContext`, `FairSpillPool`, `batch_size`, or `target_partitions`. Those are internal tuning knobs that the Rust module manages. The user's only knob is `memory_limit` — a single human-readable string like DuckDB's `SET memory_limit = '4GB'`.
+
+Advanced users who need fine-grained control can pass additional kwargs that map to DataFusion config:
+
+```python
+# Power user: override internals (rarely needed)
+table.compact(
+    memory_limit="2GB",
+    execution_config={
+        "batch_size": 16384,           # Larger batches for wide tables
+        "target_partitions": 4,        # Limit parallelism (e.g., shared machine)
+    },
+)
+```
+
+But the 99% path is just:
+
+```python
+table.compact()  # Just works. Bounded memory. No config needed.
+```
 
 ### OOM Safety
 
