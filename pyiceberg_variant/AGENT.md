@@ -1,6 +1,6 @@
 # Variant Encode/Decode — Agent Context
 
-> Last updated: 2026-06-14 (20th review pass applied)
+> Last updated: 2026-06-16 (24th review pass applied)
 > Owner: @qzyu999
 > Umbrella issue: GH-45937 [C++][Parquet] Add variant support
 
@@ -8,18 +8,23 @@
 
 ## ⚡ QUICK START — Shredding Complete (principal engineer review fixes applied, uncommitted)
 
-**Status:** Branch `variant-shredding-impl` (base commit `c5971e293c` + uncommitted review fixes) needs **Docker re-verification** after twentieth review pass (test rename, NullArray comment, PERF TODO, DCHECK addition, new test).
+**Status:** Branch `variant-shredding-impl` (base commit `c5971e293c` + uncommitted review fixes) needs **Docker re-verification** after twenty-fourth review pass (ExtractDoubleOrFloat rename, DECIMAL256 TODO, lifetime comment, PERF TODO, header doc).
 
 **What's done:**
 - Full Rust parity for primitive/object/array shredding with native typed_value extraction
 - **Object sub-field native extraction (Rust parity MAJOR)** — Primitive sub-schemas now recursively shred field values into native typed columns (Int64Array, StringArray, etc.) via `ShredVariantColumn` re-use. Enables Parquet statistics-based predicate pushdown on nested object fields. Reconstruction pre-computes per-field arrays (O(n) per field).
 - Decimal128 support with width-preserving reconstruction (Decimal4/8/16)
 - Strict timestamp type/unit/timezone matching in `IsVariantCompatibleWithType()`
+- **Strict Time64 unit matching** — Only accepts `time64(MICRO)` targets (Rust parity; prevents micros→nanos misinterpretation)
 - Strict decimal scale matching in `IsVariantCompatibleWithType()`
 - **Variant::Null semantics fixed** — matches Rust: Null goes to value column, NOT typed_value (distinguishes variant-null from SQL NULL)
 - Performance: `BuildWithoutMeta()` used in primitive reconstruction (avoids per-row metadata allocation)
+- **Performance: Object shredding O(s+k) refactored** — Replaced O(s×k) inner marking loop with single-pass `unordered_map` name→index lookup
+- **Performance: Object reconstruction builder reuse** — Cached `VariantBuilder` and metadata across rows with identical metadata bytes (common case: all rows share same metadata → O(1) amortized builder construction instead of O(n×k))
 - **INT8/INT16 shredding targets added** — Rust parity for all integer widths
 - **LARGE_STRING/LARGE_BINARY shredding targets added** — Rust parity for all string/binary types
+- **STRING_VIEW/BINARY_VIEW shredding targets added** — Full Rust parity for view-based string/binary types (shred + reconstruct)
+- **LargeList reconstruction support added** — Accepts both LIST and LARGE_LIST typed_value arrays in array reconstruction (64-bit offset support)
 - **Typed_value field type correctness** — TIMESTAMP/TIME64 output fields now declare `int64()` matching physical storage (prevents downstream schema validation issues)
 - **Big-endian safety** — `ReadLE` and Decimal128 reconstruction now endian-safe (s390x CI)
 - **Template refactor** — primitive shred loop deduplicated via `ShredPrimitiveLoop<>` / `ShredBinaryLoop<>` templates (-214 lines)
@@ -43,6 +48,10 @@
   - 18th pass: **principal engineer hardening** — `#include <cstdint>` in `variant_shredding.cc`, `ReconstructVariantColumnObject` bounds-check on typed_struct field count vs schema (prevents UB on mismatched schemas), `UnsafeAppendEncoded` defensive no-op for size≤0 (DCHECK retained for debug, graceful in release), `BuildWithoutMeta` post-move clear() comment, 1 new error test (`ReconstructObjectFieldCountMismatch`)
   - 19th pass: **C++ standards compliance + documentation** — `#include <string_view>` in `variant_shredding.cc` (the file uses `std::string_view` extensively in `GetBinaryValue`, extraction helpers, and `ShredPrimitiveLoop`; was relying on transitive inclusion via `variant_internal.h` which is fragile under unity builds and include-order changes), `ToArrowType()` doc enhancement (logical vs physical type distinction for TIMESTAMP/TIME64 documented in header), `ReconstructVariantColumnObject` per-row builder creation optimization TODO added (notes O(n×k) cost and suggests builder pooling follow-up)
   - 20th pass: **principal engineer final review — test correctness + defensive hardening** — renamed `FloatNotCompatibleWithFloat64` → `FloatCompatibleWithFloat64ViaWidening` (test name contradicted assertion), added `FloatCompatibleWithFloat32` test for explicit same-type coverage, added `DCHECK_NE(list_arr->values(), nullptr)` in `ReconstructVariantColumnArray` for defense-in-depth, `PERF TODO` prefix on `ObjectFieldShredder::AppendObject` field-lookup TODO (clarifies real performance implications for wide objects), NullArray usage comment in `ShredVariantColumnObject` explaining why null-typed array is semantically acceptable for non-Primitive sub-schemas, `ShredPrimitiveLoop` `native_val` initialization comment (documents that value is only read on extract success), test helper `.ok()`/`.ValueOrDie()` convention comment added (mirrors `variant_builder_test.cc` established pattern)
+  - 21st pass: **principal engineer performance refactoring** — `ObjectFieldShredder::AppendObject` refactored from O(s×k) to O(s+k) via single-pass `unordered_map<string_view, FieldInfo>` field lookup (eliminates inner marking loop that re-iterated all object fields per schema field), `ReconstructVariantColumnObject` builder reuse via cached `unique_ptr<VariantBuilder>` + metadata bytes comparison (eliminates O(n×k) dictionary copies for common case of uniform metadata), `#include <unordered_map>` added
+  - 22nd pass: **Rust parity — StringView/BinaryView shredding + LargeList reconstruction** — STRING_VIEW and BINARY_VIEW added as full shredding targets (shred + reconstruct), `GetBinaryValue` helper extended to support BinaryViewArray/StringViewArray, `IsVariantCompatibleWithType` updated for STRING_VIEW/BINARY_VIEW compatibility, input type validation broadened to accept BINARY_VIEW, `ReconstructVariantColumnArray` refactored via generic lambda to accept both LIST and LARGE_LIST typed_value arrays (64-bit offset support for Parquet files), TODOs updated to reflect resolved gaps, 5 new tests (StringViewShredRoundTrip, BinaryViewShredRoundTrip, ShortStringToStringView, LargeListReconstructRoundTrip, ReconstructArrayTypedValueLargeListAccepted)
+  - 23rd pass: **principal engineer parity audit — Time64 unit validation + cleanup** — `IsVariantCompatibleWithType` now validates `Time64Type` unit (only accepts `TimeUnit::MICRO`, rejects NANO — prevents micros→nanos misinterpretation in typed_value column; matches Rust which uses `Time64MicrosecondType` specifically), removed duplicate TODO block (copy-paste artifact from 16th pass edits — Decimal32/64 + TimestampSecond/Milli lines were repeated verbatim), added PERF comment on residual loop's redundant `GetObjectFieldAt` call (documents acceptable O(1) cost per field), added BinaryViewBuilder int32→int64 widening documentation comment, 3 new tests (`Time64MicroCompatibleWithTime64Micro`, `Time64NanoNotCompatibleWithTime64Micro`, `ZeroRowInput` — covers all three schema kinds with empty arrays)
+  - 24th pass: **principal engineer final polish — naming, documentation, performance TODOs** — renamed `ExtractDouble` → `ExtractDoubleOrFloat` (clarifies it handles both kFloat widening and native kDouble), added DECIMAL256 scale asymmetry TODO in `IsVariantCompatibleWithType` (notes divergence from strict Decimal128 scale matching), added `cached_meta_bytes` lifetime safety comment in `ReconstructVariantColumnObject` (documents string_view→metadata_array buffer lifetime guarantee), added PERF TODO on `ObjectFieldShredder::AppendObject` per-row `unordered_map` allocation (suggests lifting map to struct for column-scan reuse), added `\return` documentation in `variant_shredding.h` for `ReconstructVariantColumn` (clarifies that both-null produces 0x00 and callers must check struct validity bitmap for SQL NULL vs variant-null distinction). **Encoding branch (70a364b71e):** implemented `AddKey()` `lookup_buf_` optimization — replaces per-call `std::string` temporary with a reusable member buffer; `assign()` reuses existing capacity for keys that fit, eliminating the dominant allocation in column-scan workloads. Force-pushed to origin.
 
 **Next actions (when ready to submit PR):**
 1. Run Docker tests to verify all review pass changes compile and pass:
@@ -73,7 +82,7 @@
 6. Create PR targeting `variant-encoding` branch (or `main` after 45946+45947 merge)
 
 **Key files:**
-- `cpp/src/arrow/extension/variant_shredding.cc` — ~1780 lines, core shred/reconstruct engine (template-refactored, object native extraction)
+- `cpp/src/arrow/extension/variant_shredding.cc` — ~1720 lines, core shred/reconstruct engine (template-refactored, object native extraction, performance-optimized, StringView/BinaryView/LargeList)
 - `cpp/src/arrow/extension/variant_shredding_test.cc` — ~1480 lines, all round-trip + error tests
 - `cpp/src/arrow/extension/variant_shredding.h` — ~180 lines, public API
 - `cpp/src/arrow/extension/parquet_variant.h/.cc` — updated for shredded storage
@@ -98,8 +107,8 @@
 ```
 main (e16067a78c)
   └── variant-decoding (e980fd0867) — GH-45946: [C++][Parquet] Variant decoding
-       └── variant-encoding (7f51026fb8) — GH-45947: [C++][Parquet] Variant encoding
-            └── variant-shredding-impl (c5971e293c) — GH-45948: [C++][Parquet] Variant shredding ✅
+       └── variant-encoding (70a364b71e) — GH-45947: [C++][Parquet] Variant encoding
+            └── variant-shredding-impl (f855bcac4d) — GH-45948: [C++][Parquet] Variant shredding ✅
 ```
 
 - **Linear history**: shredding sits on top of encoding, which sits on top of decoding.
@@ -107,7 +116,7 @@ main (e16067a78c)
 - **Ready for force-push** to `origin/variant-decoding` and `origin/variant-encoding`.
 - **Shredding is NOT yet pushed** — local only on `variant-shredding-impl`.
 - Merge order: **45946 first, then 45947, then 45948**. Each targets the previous (or main after merge).
-- **Docker tests pass**: 286/286 tests (shredding), 238/238 tests (encoding), 165/165 tests (decoding standalone), `BUILD_WARNING_LEVEL=CHECKIN` (warnings-as-errors).
+- **Docker tests pass**: 286/286 tests (shredding, pre-22nd pass — needs re-verification ~291 expected after 22nd pass), 238/238 tests (encoding), 165/165 tests (decoding standalone), `BUILD_WARNING_LEVEL=CHECKIN` (warnings-as-errors).
 - **Shredding branch**: Implementation complete and Docker-verified. All three shredding paths (primitive, object, array) working with native typed_value extraction + Decimal128 support. Review fixes applied (timestamp bug, error handling, new tests).
 - **Namespace**: `arrow::extension::variant_internal` (renamed from `variant` to avoid Unity build collision with the `arrow::extension::variant()` factory function in `parquet_variant.cc`). See sixth review pass below.
 
@@ -152,7 +161,7 @@ main (e16067a78c)
 
 **Key improvements over initial draft**:
 - `VariantBuilder` is move-only (non-copyable, noexcept movable)
-- `AddKey()` has TODO for transparent hasher optimization
+- `AddKey()` uses `lookup_buf_` member to avoid per-call std::string allocation for hash map lookups (C++17-compatible optimization; reuses buffer capacity for existing keys)
 - `FinishArray()` validates offsets are non-negative
 - `FinishObject()` doc explicitly states "sorts in-place" in the brief
 - `Finish()` validates total dictionary size fits in 4-byte offsets
@@ -176,13 +185,13 @@ main (e16067a78c)
 
 **Test results**: 286/286 tests PASSED with `BUILD_WARNING_LEVEL=CHECKIN` (verified 2026-06-11, needs re-verification after 16th review pass)
 
-**Files** (12 changed, +2430 lines on top of encoding — reduced from +2645 after template refactor):
+**Files** (12 changed, +2430→~2720 lines on top of encoding after 22nd pass):
 - `cpp/src/arrow/extension/variant_internal.h` — Added `BuildWithoutMeta()`, `UnsafeAppendEncoded()`, `SetAllowDuplicates()` + `allow_duplicates_` member
 - `cpp/src/arrow/extension/variant_builder.cc` — Implementation of 3 new methods + `FinishObject()` duplicate handling
 - `cpp/src/arrow/extension/variant_builder_test.cc` — 10 new tests for builder extensions
 - `cpp/src/arrow/extension/variant_shredding.h` (~175 lines) — `VariantShreddingSchema`, `IsVariantCompatibleWithType()`, `ShredVariantColumn()`, `ReconstructVariantColumn()`
-- `cpp/src/arrow/extension/variant_shredding.cc` (~1720 lines) — Full shred/reconstruct engine (template-refactored)
-- `cpp/src/arrow/extension/variant_shredding_test.cc` (~1420 lines) — Schema + compat + round-trip + error tests
+- `cpp/src/arrow/extension/variant_shredding.cc` (~1720 lines) — Full shred/reconstruct engine (template-refactored, StringView/BinaryView/LargeList)
+- `cpp/src/arrow/extension/variant_shredding_test.cc` (~1480 lines) — Schema + compat + round-trip + error tests
 - `cpp/src/arrow/extension/parquet_variant.h` — Added `typed_value()`, `is_shredded()`, updated doc
 - `cpp/src/arrow/extension/parquet_variant.cc` — `IsSupportedStorageType()` accepts shredded storage; constructor finds fields by name + DCHECK; comment on value-absent schema rejection
 - Build files (CMake + Meson) — Added `variant_shredding.cc` and test; `variant_shredding.h` in install list
@@ -195,12 +204,12 @@ main (e16067a78c)
 - `ToArrowType()` — converts schema to Arrow DataType with proper struct wrapping
 - `IsVariantCompatibleWithType()` — **strict** type matching: checks TimeUnit+timezone for timestamps, scale for decimals, byte_width for UUID
 - `VariantExtensionType` — supports shredded storage (`{metadata, value?, typed_value?}`)
-- **Primitive shredding** — native extraction for: Int8, Int16, Int32, Int64, Float, Double, Bool, String, LargeString, Date32, Timestamp, Time64, Binary, LargeBinary, UUID (FixedSizeBinary(16)), Decimal128
+- **Primitive shredding** — native extraction for: Int8, Int16, Int32, Int64, Float, Double, Bool, String, LargeString, StringView, Date32, Timestamp, Time64, Binary, LargeBinary, BinaryView, UUID (FixedSizeBinary(16)), Decimal128
 - **Template-based shred loop** — `ShredPrimitiveLoop<BuilderT, NativeT, ExtractFn>()` and `ShredBinaryLoop<BuilderT>()` eliminate per-type copy-paste
 - **Object shredding** — field-level routing to typed_value sub-columns + residual object construction via `BuildWithoutMeta()`. Primitive sub-schemas recursively extract native typed columns (Int64Array, StringArray, etc.) via `ShredVariantColumn` reuse.
 - **Object reconstruction** — pre-computed per-field reconstruction (O(n) per field), merge shredded fields + residual using `UnsafeAppendEncoded()` and `SetAllowDuplicates()`
 - **Array shredding** — element extraction into ListArray of binary variant bytes
-- **Array reconstruction** — list → variant array via `UnsafeAppendEncoded()`
+- **Array reconstruction** — list/large_list → variant array via `UnsafeAppendEncoded()` (accepts both 32-bit and 64-bit offset lists)
 - **Primitive reconstruction** — re-encodes all native types back to variant bytes using `BuildWithoutMeta()` (O(1) per row, no metadata rebuild)
 - **Decimal width preservation** — reconstruction uses smallest encoding (Decimal4/8/16) that fits the value, ensuring round-trip byte identity
 - Round-trip identity: `Reconstruct(Shred(v)) == v` proven for all three schema kinds
@@ -210,8 +219,8 @@ main (e16067a78c)
 2. **Recursive shredding for nested Object/Array sub-schemas** — Object/Array sub-schema fields still store variant binary in the "value" sub-column (only Primitive sub-schemas get native extraction). Enabling recursive Object/Array shredding would require recursive `ShredVariantColumnObject`/`Array` calls.
 3. **Parquet bridge** — `VariantToNode`/`NodeToArrow` in `parquet/arrow/schema.cc` (C++-specific, not in Rust's shredding module)
 4. **clang-format** — needs to be run before pushing
-5. **BinaryView/StringView support** — `GetBinaryValue` helper returns empty for BinaryView arrays (DCHECK added); Rust supports Utf8View/BinaryView as shredding targets
-6. **LargeList/FixedSizeList/ListView support** — Rust supports all list-like types via GenericListArray; C++ only supports List (TODO added)
+5. ~~**BinaryView/StringView support**~~ ✅ DONE (22nd pass): Full shred + reconstruct for STRING_VIEW and BINARY_VIEW targets
+6. **FixedSizeList/ListView support** — Rust supports all list-like types; C++ supports List + LargeList (reconstruction). FixedSizeList and ListView remain as TODO.
 7. **Cast-based mode** — Uint8/16/32/64, Float16, Decimal32/64, TimestampSecond/Millisecond (requires CastOptions infrastructure analogous to Rust's `shred_variant_with_options()`)
 8. **Value-absent shredded schemas** — spec allows `{metadata, typed_value}` without `value`; currently rejected by `IsSupportedStorageType()` (documented)
 
@@ -483,11 +492,11 @@ Style rules are defined in `.clang-format` at the repo root. Key conventions:
 |--------|-------|--------|---------------|
 | `variant-decoding` | 165 (standalone) | ✅ PASSED | CHECKIN (werror) |
 | `variant-encoding` | 238 (full suite) | ✅ PASSED | CHECKIN (werror) |
-| `variant-shredding-impl` | ~306 (full suite) | ⏳ PENDING | CHECKIN (werror) |
+| `variant-shredding-impl` | ~314 (full suite) | ⏳ PENDING | CHECKIN (werror) |
 
 > The shredding branch includes all extension tests (bool8, json, uuid, opaque, tensor,
-> variant decoder, variant builder, variant shredding). Expected ~306 = 165 decoder + 73 encoder + 68 shredding (48 original + 6 from 8th pass + 3 from 10th pass + 2 from 11th pass + 3 compat tests from 8th pass + 2 error tests from 13th pass + 2 error tests from 15th pass + 1 from 17th pass + 1 from 18th pass).
-> **Note:** 9th pass changes (Variant::Null semantics) do not add new tests but modify 2 existing tests. 17th pass enhances `FullyShredded` test and adds `MissingFieldNativeExtraction` test. 18th pass adds `ReconstructObjectFieldCountMismatch` error test.
+> variant decoder, variant builder, variant shredding). Expected ~314 = 165 decoder + 73 encoder + 76 shredding (48 original + 6 from 8th pass + 3 from 10th pass + 2 from 11th pass + 3 compat tests from 8th pass + 2 error tests from 13th pass + 2 error tests from 15th pass + 1 from 17th pass + 1 from 18th pass + 5 from 22nd pass + 3 from 23rd pass).
+> **Note:** 9th pass changes (Variant::Null semantics) do not add new tests but modify 2 existing tests. 17th pass enhances `FullyShredded` test and adds `MissingFieldNativeExtraction` test. 18th pass adds `ReconstructObjectFieldCountMismatch` error test. 22nd pass adds StringView/BinaryView shred + LargeList reconstruction tests. 23rd pass adds Time64 unit compatibility tests and zero-row edge case test.
 
 ### Go tests
 
@@ -617,6 +626,26 @@ Arrow stores timestamps as int64 internally, and the shredding uses `Int64Builde
 
 Rust stores timestamps in `PrimitiveArray<TimestampMicrosecondType>` which carries the logical type. The C++ difference is because Arrow C++ doesn't have a `TimestampBuilder` — timestamps are built as `Int64Builder` and the type is only available through casting. This is a cosmetic divergence; the data and semantics are identical.
 
+### 17. `FinishObject` sorts fields in-place via mutable reference
+
+**C++ `FinishObject` takes `std::vector<FieldEntry>&` (non-const ref) and reorders the caller's vector.**
+
+The spec requires field IDs and offsets to be in lexicographic order of key names. Rather than copying and sorting internally, `FinishObject` sorts the caller's `fields` vector in-place and (in allow_duplicates mode) compacts it. This is an unusual API pattern — callers pass a mutable vector that gets reordered under them.
+
+**Rationale**: Avoids an O(n) copy of the fields vector on every object construction. The pattern is documented in the header ("sorts in-place") and all callers construct `fields` as a local variable that is not reused after the call. This is a deliberate API design choice for the builder's hot path.
+
+**Reviewer callout**: Mention this in the PR description. The non-const-ref parameter signals mutating intent per C++ conventions, but reviewers unfamiliar with the builder may wonder why the vector is modified.
+
+### 18. Reconstruction both-null emits Variant::Null (0x00) unconditionally
+
+**C++ `ReconstructVariantColumn` produces a non-nullable BinaryArray. When both value and typed_value are null for a row, the output contains a 0x00 byte (Variant::Null).**
+
+This means SQL NULL (structurally-absent row) is indistinguishable from Variant::Null in the reconstructed output. The Rust implementation avoids this ambiguity by returning a separate `NullBuffer` alongside the data array, which tracks struct-level validity independently.
+
+**Impact**: Callers that round-trip through shred→reconstruct lose the ability to distinguish SQL NULL from variant-null **unless** they check the original struct-level validity bitmap before calling `ReconstructVariantColumn`. This is documented in the `\return` description in `variant_shredding.h`.
+
+**Follow-up consideration**: Accept an optional validity bitmap parameter to produce a nullable output array. This would achieve full parity with Rust's `unshred_variant` semantics. Acceptable as a first implementation without this — the common Parquet use case has all rows valid (NULL is encoded at the Parquet definition level, not the variant encoding level).
+
 ---
 
 ## Additional Issues Filed
@@ -643,8 +672,9 @@ Rust stores timestamps in `PrimitiveArray<TimestampMicrosecondType>` which carri
   - ~~Recursive native extraction for object sub-fields~~ ✅ DONE (17th pass)
   - Recursive shredding for nested Object/Array sub-schemas
   - Parquet bridge (C++-specific reader/writer integration)
-  - BinaryView/StringView shredding targets
-  - LargeList/FixedSizeList/ListView shredding targets
+  - ~~BinaryView/StringView shredding targets~~ ✅ DONE (22nd pass)
+  - ~~LargeList reconstruction~~ ✅ DONE (22nd pass)
+  - FixedSizeList/ListView shredding targets
   - CastOptions mode (Uint, Float16, Decimal32/64, TimestampSecond/Milli)
   - Value-absent shredded schemas
 - See `arrow_issue_45948_solution_proposal.md` for full design doc
@@ -682,7 +712,8 @@ When creating PRs on `apache/arrow`:
   - Depends on GH-45946 (decoding) — merge order matters
   - Mirrors Go's `Builder` pattern: start/offset + finish for containers
   - Strict duplicate key rejection (spec says "must not contain duplicate keys"); configurable tolerance deferred to GH-45948 with TODO
-  - `FinishObject` sorts fields in-place — spec requires field IDs in lexicographic key order
+  - `FinishObject` sorts fields in-place — spec requires field IDs in lexicographic key order. The `std::vector<FieldEntry>&` parameter (non-const ref) mutates the caller's vector — an intentional API choice documented in the header. All callers construct `fields` as a local variable not reused after the call.
+  - `AddKey` constructs a temporary `std::string` on every lookup (heterogeneous lookup TODO documented). This is measurable for column-scan workloads but acceptable for first PR — the fix requires changing `dict_` to a transparent-hash map which is a follow-up optimization.
   - Builder is move-only, dictionary preserved across `Finish()` calls
   - TODOs documented for GH-45948 shredding: `BuildWithoutMeta`, `UnsafeAppendEncoded`, `SetAllowDuplicates`
   - 4GB size limit comment — spec's 4-byte offset maximum (Go enforces stricter 128MB)
@@ -694,7 +725,7 @@ When creating PRs on `apache/arrow`:
 git push origin variant-decoding --force-with-lease  # done → e980fd0867
 
 # Force-push updated encoding branch:
-git push origin variant-encoding --force-with-lease  # done → 7f51026fb8
+git push origin variant-encoding --force-with-lease  # done → 70a364b71e (24th pass: AddKey lookup_buf_ optimization)
 ```
 
 ---
@@ -1149,3 +1180,88 @@ All review changes have been committed and tested. Both branches are single-comm
 - `cpp/src/arrow/extension/variant_shredding_test.cc` — test rename + new test + helper convention comment
 
 **Verification**: PENDING — needs Docker re-run after 20th pass changes. Expected test count: ~308 (previous ~306 + 1 new test `FloatCompatibleWithFloat32` + test rename is net-zero on count).
+
+### Twenty-first review pass (2026-06-14, principal engineer — performance refactoring):
+
+**Shredding branch** (`variant-shredding-impl`, uncommitted on top of c5971e293c):
+
+**Performance fix #1 (object shredding — eliminates O(s×k) inner loop):**
+1. **`ObjectFieldShredder::AppendObject` — single-pass `unordered_map` field lookup**: Replaced the O(s×k) pattern where each schema field's `FindObjectField` result required a second inner loop (`GetObjectFieldAt` over all k fields) to find the positional index for `is_shredded[]` marking. New approach builds an `unordered_map<string_view, FieldInfo>` (name → {index, offset, size}) in a single O(k) pass over object fields, then looks up each schema field in O(1). Total per-row complexity: O(s + k) vs previous O(s × k). For a 10-field schema against 100-field objects across 1M rows, this eliminates ~1B redundant `GetObjectFieldAt` calls.
+
+**Performance fix #2 (object reconstruction — eliminates O(n×k) dictionary copies):**
+2. **`ReconstructVariantColumnObject` — cached `VariantBuilder` reuse across rows**: Previously created `VariantBuilder(meta)` per row, copying the entire metadata dictionary (hash map insertions + string allocations) each time. New approach caches the decoded `VariantMetadata` and a `unique_ptr<VariantBuilder>` — only reconstructed when metadata bytes actually change (rare in columnar data where all rows in a chunk share the same metadata). Between rows, `BuildWithoutMeta()` clears the builder's buffer but preserves its dictionary (`dict_`, `dict_keys_`), so subsequent `NextField()` calls resolve keys via the existing hash map without re-insertion. For the common case (uniform metadata), reduces builder construction from O(n × k) to O(1) amortized. Mixed-metadata columns degrade gracefully to per-change reconstruction.
+
+**C++ standards compliance:**
+3. **Added `#include <unordered_map>` to `variant_shredding.cc`**: Required for the new `std::unordered_map<std::string_view, FieldInfo>` in `AppendObject`. Previously not needed; now used explicitly.
+
+**No new tests** — both changes are semantically equivalent to the previous behavior (identical observable outputs). Existing round-trip tests validate correctness. The performance improvements affect constant factors and algorithmic complexity, not behavior.
+
+**Files modified:**
+- `cpp/src/arrow/extension/variant_shredding.cc` — `AppendObject` refactored (O(s+k)), `ReconstructVariantColumnObject` builder caching, `#include <unordered_map>` added
+
+**Verification**: PENDING — needs Docker re-run after 21st pass changes. Expected test count: unchanged (~308).
+
+### Twenty-second review pass (2026-06-15, Rust parity — StringView/BinaryView + LargeList):
+
+**Shredding branch** (`variant-shredding-impl`, uncommitted on top of c5971e293c):
+
+**Rust parity feature #1: StringView/BinaryView as full shredding targets:**
+1. **`GetBinaryValue` helper — BinaryView/StringView support**: Extended to handle `BINARY_VIEW` and `STRING_VIEW` array types via `BinaryViewArray::GetView()` (returns `std::string_view`, same interface as BinaryArray). Removes the previous DCHECK-and-return-empty fallback.
+2. **`IsVariantCompatibleWithType` — STRING_VIEW/BINARY_VIEW compatibility**: `kShortString` and `kString` now match `STRING_VIEW` target; `kBinary` now matches `BINARY_VIEW` target. Matches Rust's behavior where `Utf8View`/`BinaryView` are valid shredding targets.
+3. **Shredding switch — STRING_VIEW case**: Uses `ShredPrimitiveLoop<StringViewBuilder, std::string_view>` with `ExtractString` — identical pattern to the STRING/LARGE_STRING cases.
+4. **Shredding switch — BINARY_VIEW case**: Uses `ShredBinaryLoop<BinaryViewBuilder>` — identical pattern to the BINARY/LARGE_BINARY cases.
+5. **Reconstruction switch — STRING_VIEW case**: Reads from `StringViewArray::GetView(i)` (returns `std::string_view`), encodes via `vb.String()`.
+6. **Reconstruction switch — BINARY_VIEW case**: Reads from `BinaryViewArray::GetView(i)` (returns `std::string_view`), encodes via `vb.Binary()`.
+7. **Input type validation broadened**: Both `ShredVariantColumn` and `ReconstructVariantColumn` now accept `BINARY_VIEW` as valid metadata/value input array type (in addition to BINARY and LARGE_BINARY).
+
+**Rust parity feature #2: LargeList reconstruction support:**
+8. **`ReconstructVariantColumnArray` — accepts LIST and LARGE_LIST**: Refactored from a hardcoded `ListArray*` path to a generic lambda (`[&](auto* list_arr) -> Status`) that handles both `ListArray` (32-bit offsets) and `LargeListArray` (64-bit offsets). Uses `auto` for offset variables (`value_offset()` returns `int32_t` for List, `int64_t` for LargeList). Dispatches based on `typed_value_array->type_id()`.
+9. **Shredding still produces ListArray**: Array shredding output remains `ListArray` with 32-bit offsets (sufficient for per-row element counts). LargeList support is one-sided (reconstruction only) for reading Parquet files that may use 64-bit offsets.
+
+**Documentation updates:**
+10. **Header doc** (`variant_shredding.h`): Updated Rust parity gaps list — removed StringView/BinaryView, noted LargeList in reconstruction, kept FixedSizeList/ListView as remaining.
+11. **Inline TODOs updated**: Removed resolved StringView/BinaryView TODOs in shredding and reconstruction switches. Updated LargeList TODO to note shredding-side not needed (reconstruction sufficient). Remaining TODOs: FixedSizeList, ListView, cast-based mode.
+12. **Test comments updated**: Error test comments clarified to reflect BINARY_VIEW acceptance.
+
+**New tests (5 tests):**
+13. `StringViewShredRoundTrip` — String variants shredded into StringView column; verifies typed array is STRING_VIEW; round-trip reconstruction produces correct short-string header byte (0x15 for "hello").
+14. `BinaryViewShredRoundTrip` — Binary variants shredded into BinaryView column; verifies typed array is BINARY_VIEW; byte-identical content after reconstruction.
+15. `ShortStringToStringView` — Short strings (≤63 bytes, BasicType::kShortString) are compatible with StringView target and extract correctly.
+16. `LargeListReconstructRoundTrip` — Shreds array → ListArray, copies elements into LargeListArray via LargeListBuilder, reconstructs from LargeListArray, verifies byte-identical output vs List reconstruction.
+17. `ReconstructArrayTypedValueLargeListAccepted` — Empty LargeList of binary passes validation in `ReconstructVariantColumn` for array schemas.
+
+**Build system:**
+- Test file: added `#include "arrow/array/builder_nested.h"` for `LargeListBuilder`.
+- No other build system changes needed (all array/builder headers already included).
+
+**Files modified:**
+- `cpp/src/arrow/extension/variant_shredding.cc` — `GetBinaryValue` + 2 shred cases + 2 reconstruct cases + input validation + generic lambda in array reconstruction
+- `cpp/src/arrow/extension/variant_shredding.h` — updated parity gap documentation
+- `cpp/src/arrow/extension/variant_shredding_test.cc` — 5 new tests + `builder_nested.h` include + comment updates
+
+**Verification**: PENDING — needs Docker re-run after 22nd pass changes. Expected test count: ~311 (was 286 + 5 new + ~20 from passes 17-21 not yet verified).
+
+### Twenty-third review pass (2026-06-16, principal engineer parity audit — Time64 unit + cleanup):
+
+**Shredding branch** (`variant-shredding-impl`, uncommitted on top of c5971e293c):
+
+**BLOCKING fix (type compatibility correctness — latent data misinterpretation):**
+1. **`IsVariantCompatibleWithType` — strict Time64 unit validation**: `kTimeNTZ` now validates that the target `Time64Type` has `TimeUnit::MICRO`. Previously accepted any `time64()` target. The variant spec's `kTimeNTZ` stores microseconds since midnight — shredding into a `time64(NANO)` target would cause downstream consumers reading the typed_value column directly (for predicate pushdown) to misinterpret values as nanoseconds. The reconstruction path (`vb.TimeNTZ()`) always writes microseconds regardless of the typed column's declared unit, so round-trip via Reconstruct(Shred()) was safe — but direct typed_value access was not. Rust avoids this implicitly by using `Time64MicrosecondType` as the specific target type.
+
+**Code quality fix (duplicate comment removal):**
+2. **Removed duplicate TODO block in shredding switch default case**: Lines 1327-1331 duplicated the Decimal32/64 + TimestampSecond/Milli + CastOptions comment verbatim. This was a copy-paste artifact from multiple review passes stacking edits (16th pass expanded the TODO, likely introduced the duplication during a partial re-application).
+
+**Documentation / PERF comments:**
+3. **Added PERF comment on residual loop's redundant `GetObjectFieldAt` call**: In `ObjectFieldShredder::AppendObject`, the residual-building loop calls `GetObjectFieldAt()` again for every non-shredded field even though `object_field_map` already stores offset+size. Documents that this is O(1) per field (header arithmetic only) and acceptable for first implementation, with a suggestion to iterate `object_field_map` entries instead.
+4. **Added BinaryViewBuilder int32→int64 widening comment**: In the `Type::BINARY_VIEW` shred case, documents that `ShredBinaryLoop` calls `typed_builder.Append(bin_data, bin_size)` where `bin_size` is `int32_t` but `BinaryViewBuilder::Append` accepts `int64_t`. The implicit widening is safe.
+
+**New tests (3 tests):**
+5. `Time64MicroCompatibleWithTime64Micro` — Verifies `kTimeNTZ` is compatible with `time64(MICRO)` target (positive case).
+6. `Time64NanoNotCompatibleWithTime64Micro` — Verifies `kTimeNTZ` is NOT compatible with `time64(NANO)` target (would cause value misinterpretation).
+7. `ZeroRowInput` — Tests all three schema kinds (Primitive, Object, Array) with zero-row empty arrays. Verifies shred produces correct output structure (3 fields, length=0) and round-trip reconstruction succeeds on empty inputs. Catches any off-by-one errors in Reserve/Finish patterns that only manifest with empty arrays.
+
+**Files modified:**
+- `cpp/src/arrow/extension/variant_shredding.cc` — Time64 unit check, duplicate TODO removed, 2 PERF/doc comments
+- `cpp/src/arrow/extension/variant_shredding_test.cc` — 3 new tests
+
+**Verification**: PENDING — needs Docker re-run after 23rd pass changes. Expected: ~314 total tests.
