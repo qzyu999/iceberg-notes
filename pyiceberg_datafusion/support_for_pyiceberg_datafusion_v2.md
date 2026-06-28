@@ -304,17 +304,33 @@ for source_idx, target_idx in zip(source_indices, target_indices):
 
 ### Core Principle
 
-Users never choose an engine. They optionally configure a memory budget. The system automatically uses DataFusion when installed and falls back to PyArrow when not.
+Users never choose an engine. They optionally configure a memory budget. The system automatically uses DataFusion when installed and falls back to PyArrow when not. No new initialization step is required — it integrates with PyIceberg's existing config mechanisms.
 
 ```python
-# Zero-config — just works
-table.compact()
-table.delete("category = 'spam'")
-result = table.scan().to_arrow()  # transparently resolves equality deletes
+from pyiceberg.catalog import load_catalog
 
-# Power user — tune the budget
-table.compact(memory_limit="2GB")
+catalog = load_catalog("prod", uri="...")
+table = catalog.load_table("db.events")
+
+# Everything just works — default 512MB budget, spills to disk if needed
+table.compact()                          # new method
+table.delete("status = 'expired'")       # existing method, no longer OOMs on large files
+df = table.scan().to_arrow()             # existing method, now resolves equality deletes
 ```
+
+Memory budget is configurable through PyIceberg's existing config hierarchy:
+
+```yaml
+# .pyiceberg.yaml
+execution:
+  memory-limit: 1GB
+```
+```bash
+# Environment variable
+export PYICEBERG_EXECUTION__MEMORY_LIMIT=2GB
+```
+
+Most users never configure this — the default handles typical workloads. The exact configuration surface (table property, catalog property, or per-method override) will be finalized during implementation based on reviewer feedback.
 
 ### Engine Resolution
 
@@ -355,6 +371,8 @@ pip install 'pyiceberg[datafusion]'    # Enables bounded-memory compute
 ```
 
 This extra already exists in `pyproject.toml`: `datafusion = ["datafusion>=52,<53"]`.
+
+When `datafusion` is not installed, PyArrow fallback is used unchanged for all existing operations.
 
 ---
 
