@@ -121,30 +121,92 @@ Layer 0: Memory allocation
 
 This is a C-level ABI (Application Binary Interface) defined at
 https://arrow.apache.org/docs/format/CDataInterface.html that specifies exactly how
-to pass Arrow data between two libraries without copying:
+to pass Arrow data between two libraries without copying.
 
-```c
-// The entire Arrow interop contract (simplified):
-struct ArrowSchema {
-    const char* format;     // data type encoding
-    int64_t n_children;     // number of child arrays (for nested types)
-    struct ArrowSchema** children;
-    // ... release callback
-};
+#### What This Means for a Python Developer (No C Required)
 
-struct ArrowArray {
-    int64_t length;         // number of elements
-    int64_t null_count;
-    int64_t offset;
-    const void** buffers;   // validity + offsets + values
-    int64_t n_children;
-    struct ArrowArray** children;
-    // ... release callback
-};
+Think of an Arrow table as data stripped down to its bare essentials: column metadata
+(names + types) in one struct, and raw data bytes (flat memory buffers) in another.
+Here's how to visualize it:
+
+**Step 1: The Python table you're working with**
+
+```python
+# A simple 3-row table
+user_id = [1, 2, 3]
+name    = ["Alice", "Bob", "Charlie"]
+active  = [True, False, True]
 ```
 
-**Any library that can produce or consume these two C structs can interoperate
-with any other such library — zero copy, zero serialization.**
+**Step 2: ArrowSchema — the metadata (what are the columns?)**
+
+Arrow separates "what the data looks like" from "where the data lives." The schema
+is just a nested description of column names and types:
+
+```python
+# Conceptual Python equivalent of ArrowSchema
+table_schema = {
+    "type": "struct",       # a table is a struct of columns
+    "children": [
+        {"name": "user_id", "type": "int32"},
+        {"name": "name",    "type": "string"},
+        {"name": "active",  "type": "bool"},
+    ]
+}
+```
+
+**Step 3: ArrowArray — the raw data (flat memory buffers)**
+
+This is where the zero-copy magic happens. ArrowArray doesn't store Python objects
+(`int`, `str`, `bool`). It points directly to contiguous blocks of RAM — raw bytes
+laid out by the Arrow specification:
+
+```python
+# Conceptual Python equivalent of ArrowArray
+table_data = {
+    "length": 3,
+    "children": [
+        # Column 0 (user_id): raw int32 values packed into bytes
+        {"buffers": [b"\x01\x00\x00\x00\x02\x00\x00\x00\x03\x00\x00\x00"]},
+
+        # Column 1 (name): offset array + packed characters
+        # offsets: [0, 5, 8, 15] → "Alice" starts at 0, "Bob" at 5, "Charlie" at 8
+        {"buffers": [
+            b"\x00\x00\x00\x00\x05\x00\x00\x00\x08\x00\x00\x00\x0f\x00\x00\x00",
+            b"AliceBobCharlie"
+        ]},
+
+        # Column 2 (active): single byte, bits = 101 (True, False, True)
+        {"buffers": [b"\x05"]},
+    ]
+}
+```
+
+**Step 4: Zero-copy exchange — just passing memory addresses**
+
+When Polars hands data to DuckDB (or DataFusion, or PyArrow), it does NOT:
+- Serialize to JSON/CSV/Parquet
+- Copy bytes into a new buffer
+- Iterate through Python objects
+
+It hands over two memory addresses — one for the schema struct, one for the data struct.
+The receiving library reads the raw bytes directly from RAM:
+
+```python
+# What happens under the hood when two libraries exchange Arrow data:
+memory_address_of_schema = 0x7f3a_1234_5678  # pointer to ArrowSchema struct
+memory_address_of_data   = 0x7f3a_1234_9abc  # pointer to ArrowArray struct
+
+# The receiving library (DuckDB, DataFusion, etc.) takes these two pointers
+# and instantly reads the raw bytes. Zero CPU cycles spent copying.
+# The data never moves in memory — only the address is shared.
+```
+
+**This is the entire interop contract.** Two structs. Two pointers. Any library that
+can produce these structs can hand data to any library that can consume them — without
+copying a single byte. That's why swapping backends is a single-layer operation:
+every candidate library (PyArrow, DataFusion, DuckDB, Polars) speaks this same
+pointer-exchange protocol.
 
 ### 1.4.2 Which Libraries Implement the C Data Interface?
 
