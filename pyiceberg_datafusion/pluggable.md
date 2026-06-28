@@ -91,6 +91,200 @@ All six jobs above satisfy these criteria. They are pluggable.
 
 ---
 
+## 1.4 The Arrow Interop Stack: What Are the Actual Primitives?
+
+To be confident we can truly swap backends at a single layer, we need to understand
+what "speaking Arrow" actually means at the implementation level — how many layers of
+abstraction exist, and whether all engines connect at the same layer.
+
+### 1.4.1 The Arrow Interop Layers
+
+The Arrow ecosystem has a precisely defined interoperability stack:
+
+```
+Layer 4: High-level APIs (pa.Table, DataFrame, SQL result)
+         ↕  language-specific convenience wrappers
+Layer 3: RecordBatch (the fundamental unit)
+         = Schema (column names + types) + N column Arrays
+         ↕  this is what crosses library boundaries
+Layer 2: Arrow C Data Interface (the FFI standard)
+         = ArrowSchema struct + ArrowArray struct (C pointers)
+         ↕  zero-copy pointer handoff between ANY two libraries
+Layer 1: Memory layout (the physical format)
+         = Contiguous buffers: validity bitmap + offsets + values
+         ↕  raw bytes in RAM, defined by Arrow spec
+Layer 0: Memory allocation
+         = Who owns the buffer (Python heap, Rust allocator, mmap)
+```
+
+**The critical interop boundary is Layer 2: the Arrow C Data Interface.**
+
+This is a C-level ABI (Application Binary Interface) defined at
+https://arrow.apache.org/docs/format/CDataInterface.html that specifies exactly how
+to pass Arrow data between two libraries without copying:
+
+```c
+// The entire Arrow interop contract (simplified):
+struct ArrowSchema {
+    const char* format;     // data type encoding
+    int64_t n_children;     // number of child arrays (for nested types)
+    struct ArrowSchema** children;
+    // ... release callback
+};
+
+struct ArrowArray {
+    int64_t length;         // number of elements
+    int64_t null_count;
+    int64_t offset;
+    const void** buffers;   // validity + offsets + values
+    int64_t n_children;
+    struct ArrowArray** children;
+    // ... release callback
+};
+```
+
+**Any library that can produce or consume these two C structs can interoperate
+with any other such library — zero copy, zero serialization.**
+
+### 1.4.2 Which Libraries Implement the C Data Interface?
+
+| Library | Produces Arrow C Data | Consumes Arrow C Data | Zero-copy interop? |
+|---------|:---:|:---:|:---:|
+| **PyArrow** | ✅ | ✅ | ✅ (native) |
+| **DataFusion (via datafusion-python)** | ✅ | ✅ | ✅ (via PyO3 + arrow-rs) |
+| **DuckDB** | ✅ | ✅ | ✅ (`fetch_arrow_table()`, `from_arrow()`) |
+| **Polars** | ✅ | ✅ | ✅ (`to_arrow()`, `from_arrow()`) |
+| **cuDF (RAPIDS)** | ✅ | ✅ | ✅ (GPU Arrow) |
+| **pandas** | ⚠️ (via PyArrow) | ⚠️ (via PyArrow) | Indirect |
+| **NumPy** | ❌ | ❌ | ❌ (row-oriented, different format) |
+
+**All four candidate backends (PyArrow, DataFusion, DuckDB, Polars) implement the
+same C Data Interface.** This means they can hand Arrow data to each other at Layer 2
+with zero copying. There is no "some work with Arrow and some don't" — they all do.
+
+### 1.4.3 The PyCapsule Protocol (Python-Level Arrow Exchange)
+
+In Python specifically, the Arrow C Data Interface is exposed via the **PyCapsule
+protocol** (https://arrow.apache.org/docs/format/CDataInterface/PyCapsuleInterface.html):
+
+```python
+# Any object implementing these dunders can be consumed by any Arrow library:
+def __arrow_c_array__(self, requested_schema=None) -> tuple[capsule, capsule]: ...
+def __arrow_c_stream__(self, requested_schema=None) -> capsule: ...
+```
+
+This means:
+
+```python
+# DuckDB produces Arrow that PyArrow consumes — zero copy
+result = duckdb.sql("SELECT * FROM data ORDER BY x")
+pa_table = result.fetch_arrow_table()  # uses C Data Interface internally
+
+# DataFusion produces Arrow that DuckDB consumes — zero copy
+df_result = ctx.sql("SELECT * FROM t").to_arrow_table()
+duckdb.from_arrow(df_result)  # no copy
+
+# Polars produces Arrow that DataFusion consumes — zero copy
+pl_df = pl.read_parquet("file.parquet")
+ctx.register_record_batches("data", [pl_df.to_arrow().to_batches()])
+```
+
+**There is exactly ONE interop layer (Layer 2 / C Data Interface), and ALL candidate
+libraries implement it fully.** The swap is at a single point.
+
+### 1.4.4 The Swap Layer Diagram
+
+```mermaid
+graph TB
+    subgraph "PyIceberg (constant — never changes)"
+        API["Public API<br/>pa.Table, pa.RecordBatch, pa.RecordBatchReader"]
+        SEM["Iceberg Semantics<br/>(scan planning, commit, delete index)"]
+        SCHEMA["Schema conversion<br/>(Iceberg Schema ↔ Arrow Schema)<br/>SHARED by all backends"]
+    end
+
+    subgraph "THE SWAP LAYER (one boundary, Arrow C Data Interface)"
+        IFACE["Backend Protocol<br/>Input: Arrow RecordBatch + metadata<br/>Output: Arrow RecordBatch + metadata"]
+    end
+
+    subgraph "Backend implementations (swappable)"
+        PA["PyArrowBackend<br/>pq.read_table() → pa.RecordBatch<br/>pc.Expression → filter<br/>pq.ParquetWriter → write"]
+        DF["DataFusionBackend<br/>register_parquet() → RecordBatch<br/>SQL → sort/join/filter<br/>(write delegated to PyArrow)"]
+        DDB["DuckDBBackend<br/>duckdb.read_parquet() → Arrow<br/>SQL → sort/join/filter<br/>duckdb.write_parquet() → write"]
+        POL["PolarsBackend<br/>pl.scan_parquet() → Arrow<br/>expressions → sort/filter<br/>(no spill — limited)"]
+    end
+
+    API --> SEM --> SCHEMA --> IFACE
+    IFACE --> PA
+    IFACE --> DF
+    IFACE --> DDB
+    IFACE --> POL
+```
+
+**There is exactly ONE swap layer.** Above it: PyIceberg's constant API and semantics.
+Below it: interchangeable backend implementations. The boundary is Arrow RecordBatch
+(exchanged via C Data Interface, zero-copy). It does not go "multiple layers deep" —
+it is a single, flat interface.
+
+### 1.4.5 What About Schema Conversion?
+
+Schema conversion (`Iceberg Schema ↔ Arrow Schema`) sits ABOVE the swap layer because:
+- All backends use Arrow Schema (it's part of the Arrow format spec)
+- The conversion is from Iceberg's logical types → Arrow's type system
+- It's the same Arrow Schema regardless of which backend reads the data
+- The 800-line visitor code is shared infrastructure, not backend-specific
+
+```python
+# This conversion is used by ALL backends — it's above the swap layer
+arrow_schema = schema_to_pyarrow(iceberg_schema)  # Iceberg → Arrow Schema
+
+# Then any backend can use the Arrow Schema:
+# PyArrow: pq.read_table(file, schema=arrow_schema)
+# DataFusion: ctx.register_parquet("t", file)  (infers schema from Parquet, compatible)
+# DuckDB: duckdb.read_parquet(file)  (same)
+```
+
+### 1.4.6 What About Expression Conversion?
+
+Expression conversion IS backend-specific (sits below the swap layer):
+
+```python
+# Each backend has its own expression format:
+# PyArrow:     pc.field("x") > pc.scalar(5)
+# DataFusion:  "x > 5" (SQL string)
+# DuckDB:      "x > 5" (SQL string)
+# Polars:      pl.col("x") > 5
+
+# The Iceberg BooleanExpression → backend expression is per-backend code.
+# This is part of each backend's implementation, not shared infrastructure.
+```
+
+But expressions are simple — a typical predicate is one line. The conversion is
+straightforward for any backend that supports SQL (DataFusion, DuckDB) or a reasonable
+expression DSL (Polars).
+
+### 1.4.7 Confidence Statement
+
+**Can we truly swap the backend at a single layer and have everything work?**
+
+**Yes, for all four candidates**, because:
+
+1. All four implement the Arrow C Data Interface (zero-copy exchange at Layer 2)
+2. All four can read Parquet files into Arrow RecordBatches
+3. All four can produce Arrow output that PyIceberg's write path consumes
+4. Schema conversion is shared (Arrow Schema is universal)
+5. Only expression conversion is per-backend (trivial for SQL-based engines)
+
+The swap is genuinely at a single, flat boundary. There is no "complex network of
+relations/connectors" below — it's just:
+```
+PyIceberg semantics → [Arrow RecordBatch boundary] → Backend does work → [Arrow RecordBatch boundary] → PyIceberg continues
+```
+
+One boundary in, one boundary out. Arrow RecordBatch both times. Any library that
+speaks Arrow (all four do) works at both boundaries.
+
+---
+
 ## 2. How PyArrow Is Coupled in PyIceberg Today
 
 ### 2.1 The Monolith
