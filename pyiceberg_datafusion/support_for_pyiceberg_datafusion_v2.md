@@ -638,6 +638,8 @@ DV compaction reuses the streaming CoW rewrite infrastructure. DVs themselves ar
 
 7. **Schema reconciliation before anti-join**: Equality delete files may have a different schema than data files (subset of columns, different column order, evolved types). PyIceberg must project both to a common schema before handing to DataFusion. Should this projection happen in Python (read with projected schema) or in DataFusion SQL (SELECT with explicit column list)? The latter is more efficient but requires careful SQL generation.
 
+8. **Metadata streaming for cross-snapshot operations**: Operations like orphan file deletion and expire-snapshots-with-cleanup must enumerate all file paths across all snapshots — potentially millions of entries. Today PyIceberg materializes these into Python lists/sets. The correct approach is streaming (generator → temp Parquet → register with DataFusion), but this requires converting existing manifest iteration code from list-accumulation to generator-based patterns. How aggressively should we refactor existing code paths? New operations should use streaming from day one, but migrating `_plan_files_local()` and `_collect_data_entries_from_manifest()` touches core scan infrastructure and risks regressions. Should we gate this behind the DataFusion code path (only stream when DataFusion is doing the work) or make it a universal pattern regardless of engine?
+
 ---
 
 ## Goals
