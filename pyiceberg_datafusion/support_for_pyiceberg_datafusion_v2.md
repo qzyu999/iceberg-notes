@@ -624,13 +624,19 @@ DV compaction reuses the streaming CoW rewrite infrastructure. DVs themselves ar
 
 ## Open Questions
 
-1. **Object store config completeness**: Does `datafusion-python` expose all necessary object store configuration (STS tokens, custom endpoints, assume-role)? Need to audit.
+1. **Granularity of delete resolution**: Should equality deletes be resolved per-file (one anti-join per data file, each against its applicable delete files) or per-partition (one larger anti-join for all data files in a partition against all applicable deletes)? Per-file is simpler and more parallelizable but has higher per-invocation overhead. Per-partition amortizes session setup but requires careful schema reconciliation across files.
 
-2. **Streaming vs. batch resolution**: Should equality deletes be resolved per-file (small anti-joins, many invocations) or per-partition (larger anti-joins, fewer invocations)?
+2. **Interaction with `to_arrow_batch_reader()` (streaming scans)**: Today `scan().to_arrow_batch_reader()` is streaming — it yields batches without materializing the full table. How do we resolve equality deletes in this streaming path? The anti-join requires the full delete set accessible during probe. Options: (a) eagerly resolve deletes per-file before yielding batches, (b) buffer the delete set and filter in Python as batches arrive, (c) register the batch reader as a DataFusion source and execute the full scan as a DataFusion plan.
 
-3. **Memory limit default**: 512MB (safe on 8GB machines) or percentage of available RAM? Configurable via `.pyiceberg.yaml`?
+3. **Write-path integration point**: After DataFusion sorts/filters data, PyIceberg writes the output via its existing `_dataframe_to_data_files()`. This function today expects a `pa.Table` or `RecordBatchReader`. Should we consume DataFusion's output as a `RecordBatchReader` (streaming, bounded memory during write) or collect to a `pa.Table` (simpler but re-materializes)? The former is correct but requires threading DataFusion's async output into PyArrow's sync writer.
 
-4. **datafusion-python version stability**: The `RuntimeEnvBuilder` API and object store registration API — are they stable across minor versions?
+4. **Concurrent operations and session lifecycle**: Should each operation create a fresh `SessionContext` (isolation, simple) or share a session across operations on the same table (amortize object store setup, potential for session-level caching of registered tables)? Fresh-per-operation is simpler but may have measurable overhead for rapid successive operations.
+
+5. **Testing without cloud storage**: Integration tests for the object store bridge need S3/GCS access. How do we test in CI? Options: (a) mock object store, (b) MinIO in Docker for S3, (c) local filesystem only in CI with cloud tests as manual/nightly. This affects contributor experience.
+
+6. **Fallback behavior on DataFusion errors**: If DataFusion fails mid-operation (e.g., disk full during spill, unsupported SQL expression), should PyIceberg (a) propagate the error immediately, (b) fall back to PyArrow silently, or (c) fall back with a warning? Silent fallback hides bugs; immediate failure is correct but may surprise users who expected it to "just work."
+
+7. **Schema reconciliation before anti-join**: Equality delete files may have a different schema than data files (subset of columns, different column order, evolved types). PyIceberg must project both to a common schema before handing to DataFusion. Should this projection happen in Python (read with projected schema) or in DataFusion SQL (SELECT with explicit column list)? The latter is more efficient but requires careful SQL generation.
 
 ---
 
