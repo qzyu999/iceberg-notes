@@ -603,3 +603,160 @@ The update from `CommitFailedException` to `ValidationException` in `test_optimi
 | **Overall quality** | **HIGH** — production-ready |
 
 The PR author has done solid work understanding the Java implementation's principles and adapting them for Python's different architectural constraints. The test suite is comprehensive and the documentation additions are clear. The subtle design choice of `table_metadata` as a computed property that reflects staged updates makes the multi-producer retry path correct without needing explicit inter-producer coordination. This is ready to merge.
+
+---
+
+## 13. Post-Review Check (2026-06-21): Nits Still Outstanding
+
+After the PR author pushed their latest changes (manifest list tracking, CommitWindow refactoring, branch fixes), I ran the tests locally — **all pass**. The manifest list fix and branch-aware retry are correctly implemented.
+
+However, three minor nits from the original review remain unaddressed. None are correctness bugs or blockers, but they're worth calling out for a follow-up or quick fix before merge.
+
+---
+
+### Nit A: `_isolation_level_property` missing from class-level declarations
+
+**What it is:**
+
+Every other instance field on `_SnapshotProducer` is declared at the class level (above `__init__`) as a type annotation:
+
+```python
+class _SnapshotProducer(UpdateTableMetadata[U], Generic[U]):
+    commit_uuid: uuid.UUID
+    _io: FileIO
+    _operation: Operation
+    _snapshot_id: int
+    _parent_snapshot_id: int | None
+    _starting_snapshot_id: int | None
+    _added_data_files: list[DataFile]
+    _manifest_num_counter: itertools.count[int]
+    _deleted_data_files: set[DataFile]
+    _compression: AvroCompressionCodec
+    _target_branch: str | None
+    _predicate: BooleanExpression
+    _case_sensitive: bool
+    _commit_window: CommitWindow | None
+    _written_manifests: list[str]
+    _uncommitted_manifests: list[str]
+    _written_manifest_lists: list[str]
+    # ← _isolation_level_property is NOT here
+```
+
+But `_isolation_level_property` is only set inside `__init__`:
+```python
+self._isolation_level_property: str = TableProperties.WRITE_DELETE_ISOLATION_LEVEL
+```
+
+**Why it matters:**
+
+This is a PyIceberg style convention. Class-level declarations serve as documentation — they tell you "these are all the fields this class uses" without having to read through `__init__`. When one field breaks the pattern, a reader scanning the class-level declarations won't know `_isolation_level_property` exists. They'll only discover it by reading the full `__init__` or finding it used in `_validate_concurrency()`.
+
+It's also relevant for static analysis tools (mypy, Pyright) — class-level annotations are the canonical way to declare instance fields in Python dataclass-style code. Without it, the type is only inferred from the assignment.
+
+**Fix (one line):**
+
+Add to the class-level declarations:
+```python
+_isolation_level_property: str
+```
+
+---
+
+### Nit B: `commit()` should call `super().commit()` instead of duplicating base logic
+
+**What it is:**
+
+The base class `UpdateTableMetadata` defines:
+```python
+class UpdateTableMetadata:
+    def commit(self) -> None:
+        self._transaction._apply(*self._commit())
+```
+
+The `_SnapshotProducer` subclass overrides it:
+```python
+class _SnapshotProducer(UpdateTableMetadata[U], Generic[U]):
+    def commit(self) -> None:
+        self._transaction._register_snapshot_producer(self)
+        self._transaction._apply(*self._commit())  # ← duplicated from base
+```
+
+**Why it matters:**
+
+This violates the "don't repeat yourself" principle for inheritance. If someone later adds logic to the base `UpdateTableMetadata.commit()` (e.g., logging, validation, metrics), the `_SnapshotProducer` override won't pick it up — because it copies the implementation rather than calling through.
+
+Today this works fine. But 6 months from now, someone adds a commit hook to the base class, wonders why it doesn't fire for snapshot producers, and spends 30 minutes debugging before finding this override.
+
+**Fix:**
+```python
+def commit(self) -> None:
+    self._transaction._register_snapshot_producer(self)
+    super().commit()  # ← delegates to base, which calls _apply(*self._commit())
+```
+
+Functionally identical today, but future-proof.
+
+---
+
+### Nit C: `list[Any]` typing for `_snapshot_producers` and `_register_snapshot_producer`
+
+**What it is:**
+
+In `Transaction.__init__()`:
+```python
+self._snapshot_producers: list[Any] = []
+```
+
+And:
+```python
+def _register_snapshot_producer(self, producer: Any) -> None:
+    """Register a snapshot producer for retry support."""
+    self._snapshot_producers.append(producer)
+```
+
+**Why it matters:**
+
+`Any` tells the type checker "I give up, don't check anything about this object." That means:
+- If you typo `producer._refresh_for_rety()` (missing `r`), mypy won't catch it.
+- If you pass a `str` instead of a producer, mypy won't complain.
+- IDE autocompletion on items in `_snapshot_producers` gives you nothing — no suggestions for `._refresh_for_retry()`, `._validate_concurrency()`, etc.
+
+The actual type is `_SnapshotProducer[Any]`. The reason `Any` was used is probably to avoid a circular import — `_SnapshotProducer` is in `pyiceberg.table.update.snapshot` and `Transaction` is in `pyiceberg.table`. But Python has a standard pattern for this:
+
+```python
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pyiceberg.table.update.snapshot import _SnapshotProducer
+```
+
+The `TYPE_CHECKING` block is only evaluated by type checkers (mypy/Pyright) and IDEs, never at runtime. So it doesn't cause circular import issues at runtime, but gives you full type safety and autocompletion during development.
+
+**Fix:**
+
+In `pyiceberg/table/__init__.py`, add to the existing `TYPE_CHECKING` block:
+```python
+if TYPE_CHECKING:
+    from pyiceberg.table.update.snapshot import _SnapshotProducer
+```
+
+Then change:
+```python
+self._snapshot_producers: list[_SnapshotProducer[Any]] = []
+
+def _register_snapshot_producer(self, producer: _SnapshotProducer[Any]) -> None:
+```
+
+---
+
+### Summary: Nit Status Table
+
+| Nit | Original Section | Status After Latest Push | Severity |
+|-----|-----------------|--------------------------|----------|
+| `_isolation_level_property` not at class level | §4.1 | ❌ Still present | Low (style) |
+| `commit()` doesn't call `super()` | §4.3 | ❌ Still present | Low (maintenance risk) |
+| `list[Any]` typing | §5.4 / §5.5 | ❌ Still present | Low (type safety) |
+| `DataScan` formatting change | §5.1 | ✅ No longer applicable (upstream refactored) | — |
+| `_case_sensitive` behavior change | §5.2 | ⚠️ Still present, correct but undocumented | Very low |
+
+**Recommendation:** Mention these as "nits for follow-up" in the review comment. None are blocking. The first three are one-liner fixes that could be addressed in a quick follow-up commit or squashed in before merge if the author is willing.
