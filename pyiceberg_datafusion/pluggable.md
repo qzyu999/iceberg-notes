@@ -977,7 +977,305 @@ graph TD
 
 ---
 
-## 10. Summary
+## 10. Execution Scope: Single-Node, Distributed, and the Boundaries
+
+### 10.1 PyIceberg's Execution Model
+
+PyIceberg is a **library** — users `import pyiceberg` in a Python process. It is not a
+cluster, not a service, not a distributed system. Its execution model is single-node:
+
+```python
+# The typical PyIceberg usage — one Python process
+from pyiceberg.catalog import load_catalog
+table = catalog.load_table("db.events")
+table.compact()  # runs in this process, on this machine
+```
+
+This is fundamentally different from distributed engines (Spark, Flink, Trino) which
+run Iceberg operations across a cluster. Those engines have their own Iceberg connectors.
+PyIceberg's role in that world is metadata + catalog, not distributed compute.
+
+### 10.2 Where Ray and Dask Fit
+
+Ray and Dask are **distributed orchestration frameworks** for Python. They solve a
+different problem than DataFusion:
+
+| Framework | What it solves | Execution model | Handles OOM? |
+|-----------|---------------|-----------------|:---:|
+| **DataFusion** | Single-node bounded-memory compute | One process, spill to local SSD | ✅ Spill-to-disk |
+| **Ray** | Horizontal parallelism across machines | Distribute tasks to workers | ❌ Each worker still OOMs individually |
+| **Dask** | Parallel/distributed DataFrames | Partition across workers | ❌ Each partition must fit in worker RAM |
+| **Spark** | Full distributed execution | Shuffle + spill across cluster | ✅ But requires JVM cluster |
+
+**Key insight:** Ray and Dask don't solve the OOM problem. They distribute work across
+machines, but each machine still needs to process its partition in bounded memory. If
+a single 10GB file needs sorting with 2GB RAM, Ray doesn't help — the worker sorting
+that file still OOMs.
+
+DataFusion solves the **vertical** scaling problem (handle arbitrarily large data on
+one machine via spill-to-disk). Ray/Dask solve the **horizontal** scaling problem
+(process many files in parallel across machines). These are orthogonal.
+
+### 10.3 PyIceberg in Distributed Environments
+
+Users DO deploy PyIceberg in distributed settings, but like this:
+
+```python
+# Ray worker uses PyIceberg for metadata, then processes data locally
+@ray.remote
+def compact_partition(table_name, partition):
+    table = catalog.load_table(table_name)
+    # PyIceberg identifies files, DataFusion does bounded-memory sort on THIS worker
+    table.compact(partition_filter=partition)
+    # Each worker handles its partition independently — single-node per worker
+
+# Orchestrator distributes partitions across workers
+ray.get([compact_partition.remote("db.events", p) for p in partitions])
+```
+
+PyIceberg is the **per-worker library**. DataFusion's spill-to-disk is what prevents
+each individual worker from OOMing. Ray's contribution is parallelizing across partitions.
+These compose cleanly:
+
+```
+Ray/Dask (horizontal: which machines?)  ×  DataFusion (vertical: bounded memory per machine)
+```
+
+### 10.4 Scope Declaration
+
+For this proposal:
+- **In scope:** Single-node bounded-memory compute via DataFusion (the OOM problem)
+- **In scope:** Pluggable read/write backends (the interop layer)
+- **Out of scope:** Distributed execution (handled by Ray/Dask/Spark wrapping PyIceberg)
+- **Out of scope:** Multi-machine coordination, shuffle, distributed joins
+
+These are independent architectural layers:
+
+```mermaid
+graph TB
+    subgraph "Layer 3: Distributed Orchestration (out of scope)"
+        RAY["Ray / Dask / Spark"]
+        NOTE["Distributes work across machines<br/>Each machine runs PyIceberg independently"]
+    end
+
+    subgraph "Layer 2: PyIceberg per-node (our scope)"
+        PYICE["PyIceberg<br/>(Iceberg semantics, catalog, commit)"]
+        EXEC["Execution module<br/>(DataFusion for bounded-memory compute)"]
+        IO["I/O Backend<br/>(pluggable: PyArrow, DataFusion, DuckDB)"]
+    end
+
+    subgraph "Layer 1: Storage"
+        S3["S3 / GCS / ADLS / Local"]
+    end
+
+    RAY -->|"partitions work"| PYICE
+    PYICE --> EXEC
+    PYICE --> IO
+    IO --> S3
+    EXEC -->|"spill"| LOCAL["Local SSD (temp)"]
+```
+
+A future "distributed PyIceberg" could layer Ray on top without changing anything
+in our architecture — each Ray worker simply imports PyIceberg and calls `table.compact()`
+on its assigned partition. The bounded-memory guarantee holds per-worker.
+
+---
+
+## 11. The Complete Configuration API
+
+### 11.1 Design Principle: Stratified Configuration (CS: Separation of Policy and Mechanism)
+
+The pluggable architecture introduces three independent configuration axes:
+
+```
+Configuration = IOBackend × ComputeBackend × MemoryBudget
+```
+
+These are orthogonal — choosing one doesn't constrain the others:
+
+| Axis | What it controls | Default | Override mechanism |
+|------|-----------------|---------|-------------------|
+| `IOBackend` | Who reads/writes Parquet | `pyarrow` | `.pyiceberg.yaml` or future API |
+| `ComputeBackend` | Who does sort/join/filter | `datafusion` (if installed), else `pyarrow` | `.pyiceberg.yaml` or future API |
+| `MemoryBudget` | How much RAM before spill | `512MB` | `.pyiceberg.yaml`, env var |
+
+### 11.2 Configuration Surface (User-Facing)
+
+The API should not change for existing operations. New configuration lives in
+PyIceberg's existing config system:
+
+```yaml
+# .pyiceberg.yaml (future, Phase 2+)
+execution:
+  memory-limit: 1GB
+  compute-backend: datafusion   # or: pyarrow (fallback)
+  io-backend: pyarrow           # or: datafusion, duckdb (future)
+```
+
+```bash
+# Environment variable override
+export PYICEBERG_EXECUTION__MEMORY_LIMIT=2GB
+export PYICEBERG_EXECUTION__COMPUTE_BACKEND=datafusion
+```
+
+**For Phase 1 (our immediate work):** No configuration needed. The system auto-detects:
+- If `datafusion` is importable → use it for compute
+- If not → fall back to PyArrow
+- Memory limit defaults to 512MB
+
+Users see zero config change. Things just work better.
+
+### 11.3 How the API Does NOT Change
+
+Existing methods keep their exact signatures:
+
+```python
+# These signatures are UNCHANGED:
+table.append(df)                         # df: pa.Table | pa.RecordBatchReader
+table.overwrite(df)                      # same
+table.delete("status = 'expired'")       # same
+df = table.scan().to_arrow()             # same
+batches = table.scan().to_arrow_batch_reader()  # same
+```
+
+New methods are additive:
+
+```python
+# New methods (Phase 1):
+table.compact()                          # new, no backend param needed
+table.delete_orphan_files()              # new
+table.rewrite_position_deletes()         # new
+```
+
+The backend selection happens **internally**, invisible to the user:
+
+```python
+# Inside PyIceberg (user never sees this):
+def compact(self):
+    engine = resolve_engine("compaction")  # auto-detects backend
+    if engine == ExecutionEngine.DATAFUSION:
+        # DataFusion sorts with bounded memory
+        ...
+    else:
+        # PyArrow fallback (OOMs on large data)
+        ...
+```
+
+### 11.4 The Mix-and-Match Principle
+
+The three backend axes (IO, Compute, Memory) compose independently because Arrow is
+the wire format between them:
+
+```mermaid
+graph LR
+    subgraph "IO Backend (who reads/writes)"
+        IO_PA["PyArrow reads Parquet"]
+        IO_DF["DataFusion reads Parquet"]
+        IO_DDB["DuckDB reads Parquet"]
+    end
+
+    subgraph "Arrow RecordBatch (universal wire format)"
+        ARROW["pa.RecordBatch"]
+    end
+
+    subgraph "Compute Backend (who sorts/joins)"
+        C_DF["DataFusion sorts<br/>(with spill-to-disk)"]
+        C_PA["PyArrow sorts<br/>(in-memory only)"]
+    end
+
+    subgraph "Arrow RecordBatch (output)"
+        ARROW2["pa.RecordBatch"]
+    end
+
+    subgraph "Write Backend (who writes Parquet)"
+        W_PA["PyArrow writes"]
+        W_DDB["DuckDB writes"]
+    end
+
+    IO_PA --> ARROW
+    IO_DF --> ARROW
+    IO_DDB --> ARROW
+    ARROW --> C_DF
+    ARROW --> C_PA
+    C_DF --> ARROW2
+    C_PA --> ARROW2
+    ARROW2 --> W_PA
+    ARROW2 --> W_DDB
+```
+
+Valid configurations (all produce correct results):
+
+| Read | Compute | Write | Works? | Notes |
+|------|---------|-------|:---:|---|
+| PyArrow | DataFusion | PyArrow | ✅ | **Our Phase 1 default** |
+| DataFusion | DataFusion | PyArrow | ✅ | Full DF pipeline, PyArrow writes |
+| DuckDB | DataFusion | PyArrow | ✅ | DuckDB reads fast, DF sorts with spill |
+| PyArrow | PyArrow | PyArrow | ✅ | Current behavior (no DF), OOMs on large |
+| DuckDB | DuckDB | DuckDB | ⚠️ | Works if DuckDB controls entire pipeline |
+| Polars | Polars | Polars | ❌ | No spill — can't handle OOM operations |
+
+### 11.5 Why This Follows CS Best Practice
+
+**Principle: Separation of Policy and Mechanism (Lampson, 1983)**
+
+- **Mechanism** = how to read Parquet, how to sort, how to write
+- **Policy** = which library does each job
+
+The pluggable protocol separates these. The mechanism (Arrow-in/Arrow-out protocol)
+is fixed. The policy (which backend) is configurable. This is the same pattern used
+by:
+- Linux VFS (filesystem operations are the mechanism; ext4/btrfs/nfs are the policy)
+- Java JDBC (SQL operations are the mechanism; MySQL/Postgres are the policy)
+- Python logging (log emission is the mechanism; file/console/network are the policy)
+
+**Principle: Open-Closed (Meyer, 1988)**
+
+The system is **open** for extension (add new backends without modifying existing code)
+and **closed** for modification (existing backends don't change when new ones are added).
+
+**Principle: Dependency Inversion (Martin, 1996)**
+
+PyIceberg's table operations depend on the **abstract protocol** (`IOBackend`,
+`ComputeBackend`), not on concrete implementations (`pyarrow.parquet`, `datafusion`).
+High-level policy doesn't depend on low-level detail.
+
+### 11.6 The Inevitable Constraint: Compute Backend Selection Is Not Truly Free
+
+While read/write backends are freely swappable (any library can read/write Parquet
+to/from Arrow), the **compute backend for OOM-prone operations** is constrained:
+
+```
+ComputeBackend.sort(data, keys, memory_limit) MUST honor memory_limit.
+
+Backends that CAN satisfy this contract:
+  ✅ DataFusion (FairSpillPool + DiskManager)
+  ⚠️ DuckDB (internal memory management, partial)
+
+Backends that CANNOT:
+  ❌ PyArrow (no memory management)
+  ❌ Polars (no spill-to-disk for sort)
+  ❌ pandas (no memory management)
+```
+
+This means the `compute-backend` config has a **capability gate**: operations that
+require bounded memory will reject backends that can't provide it:
+
+```python
+def sort(self, data, keys, memory_limit):
+    if self.backend == "polars":
+        raise UnsupportedOperation(
+            "Polars cannot honor memory_limit (no spill-to-disk). "
+            "Use compute-backend: datafusion for bounded-memory operations."
+        )
+```
+
+This is not a design flaw — it's an honest capability declaration. Not all backends
+are equal. The pluggable interface lets you choose, but physics constrains the choice
+for memory-intensive operations.
+
+---
+
+## 12. Summary
 
 | Question | Answer |
 |----------|--------|
@@ -986,6 +1284,8 @@ graph TD
 | Do all libraries interop? | **Yes** — 25/25 permutations tested, all pass via Arrow C Data Interface |
 | Is the interface narrow? | Yes — ~7 methods, all Arrow-in/Arrow-out |
 | Can all backends honor `memory_limit`? | **No** — only DataFusion guarantees it. DuckDB partially. Polars/PyArrow cannot. |
-| Is refactoring the monolith feasible? | Yes, but large (3K lines) and best done after Phase 1 |
+| Is the backend choice truly free? | For read/write: yes. For compute: constrained by spill capability. |
+| What about distributed (Ray/Dask)? | Orthogonal layer. They distribute work; DataFusion handles per-node memory. Compose cleanly. |
+| Does the API change? | **No** — existing methods unchanged. New methods are additive. Backend selection is internal. |
 | Should we build the pluggable interface now? | No — build DataFusion first, extract protocol after |
 | Does this change our immediate plan? | No — we write clean Arrow-based functions that ARE the implicit interface |
