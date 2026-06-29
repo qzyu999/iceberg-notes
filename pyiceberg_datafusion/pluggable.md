@@ -728,13 +728,264 @@ by building the abstraction layer first.
 
 ---
 
-## 8. Summary
+## 8. Empirical Proof: All Permutations Work
+
+We ran a full 5×5 permutation test across PyArrow, DataFusion, DuckDB, Polars, and
+pandas. Every library produced Arrow data, and every other library consumed it successfully.
+
+**Test results (all 25/25 pass):**
+
+```
+Libraries: PyArrow 20.0.0, DataFusion 53.0.0, DuckDB 1.5.4, Polars 1.34.0, pandas 2.2.3
+
+     pyarrow → pyarrow   : ✓    pyarrow → datafusion: ✓    pyarrow → duckdb: ✓
+     pyarrow → polars    : ✓    pyarrow → pandas    : ✓
+  datafusion → pyarrow   : ✓    datafusion → duckdb : ✓    datafusion → polars: ✓
+  datafusion → pandas    : ✓    datafusion → datafusion: ✓
+      duckdb → pyarrow   : ✓    duckdb → datafusion : ✓    duckdb → polars: ✓
+      duckdb → pandas    : ✓    duckdb → duckdb     : ✓
+      polars → pyarrow   : ✓    polars → datafusion : ✓    polars → duckdb: ✓
+      polars → pandas    : ✓    polars → polars     : ✓
+      pandas → pyarrow   : ✓    pandas → datafusion : ✓    pandas → duckdb: ✓
+      pandas → polars    : ✓    pandas → pandas     : ✓
+
+Cross-library transfers: 20/20 successful
+```
+
+This empirically confirms: the Arrow C Data Interface is a single, universal swap
+layer. Any backend can hand data to any other backend. The pluggable architecture
+has exactly one interop boundary, and all candidates participate in it.
+
+(Test script: `arrow_interop_test.py` in this directory.)
+
+---
+
+## 9. The Memory Hierarchy: RAM, SSD, and the OOM Problem
+
+### 9.1 Where Arrow Data Actually Lives
+
+Arrow data exists in **RAM** (Layer 1 of the interop stack — physical memory buffers).
+When you have a 10GB Arrow table, that's 10GB of RAM consumed. There is no escaping this
+for in-memory operations.
+
+The storage hierarchy relevant to PyIceberg:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ SSD / Object Store (S3, GCS)                                    │
+│ Capacity: Unlimited    Bandwidth: 100MB-7GB/s    Latency: μs-ms │
+│ Format: Parquet (compressed columnar)                           │
+│ Size: ~3-10x smaller than Arrow (compression + encoding)        │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ Read: decompress + decode
+                               │ Write: encode + compress
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ RAM                                                              │
+│ Capacity: 8-256GB     Bandwidth: 50-100GB/s     Latency: ns     │
+│ Format: Arrow (uncompressed columnar)                           │
+│ Size: Full data size (no compression)                           │
+│                                                                 │
+│ THIS is where OOM happens. When Arrow data > available RAM,     │
+│ the process is killed.                                          │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ Spill: write temp Arrow IPC to disk
+                               │ (only DataFusion does this)
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Local SSD (temp space for spill)                                │
+│ Capacity: 100GB-2TB   Bandwidth: 3-7GB/s (NVMe)                │
+│ Format: Arrow IPC (uncompressed, zero-deserialization on read)  │
+│ Purpose: Overflow when RAM is exhausted                         │
+│                                                                 │
+│ Only DataFusion uses this. PyArrow, DuckDB, Polars do NOT have  │
+│ a spill-to-disk mechanism for sort/join.                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 9.2 The OOM Mechanism (Precise)
+
+When an operation needs more Arrow data in RAM than available:
+
+```python
+# PyArrow sort: allocates full output buffer in RAM
+sorted_table = pa.Table.sort_by(big_table, "col")
+# If big_table is 20GB and RAM is 16GB → OOM (killed by OS)
+
+# DuckDB sort: also in-memory (no external sort for this path)
+duckdb.sql("SELECT * FROM big_table ORDER BY col")
+# DuckDB has internal memory management but its Python API doesn't
+# expose configurable spill for user-registered Arrow data
+
+# DataFusion sort: spills to disk
+ctx = SessionContext(runtime=RuntimeEnvBuilder().with_fair_spill_pool(4_000_000_000))
+ctx.register_parquet("big_table", "s3://bucket/file.parquet")
+ctx.sql("SELECT * FROM big_table ORDER BY col")
+# Sorts 20GB with 4GB budget: writes sorted runs to SSD, merges back
+```
+
+### 9.3 Per-Library Memory Behavior: The Complete Picture
+
+| Library | Sort mechanism | Join mechanism | Memory model | Spill-to-disk? | OOM behavior |
+|---------|--------------|----------------|--------------|:-:|---|
+| **PyArrow** | `pa.Table.sort_by()` — full materialization | No join operator | Unbounded — allocates as needed | ❌ | Process killed when RAM exhausted |
+| **DataFusion** | `SortExec` — external merge sort | `HashJoinExec` — Grace Hash Join | `FairSpillPool` — configurable hard limit | ✅ | Spills sorted runs / hash partitions to local SSD as Arrow IPC |
+| **DuckDB** | Internal buffer manager | Internal hash join | Internal memory management, configurable `memory_limit` | ⚠️ Partial | DuckDB manages its own memory pool; spill works for DuckDB-native operations but NOT for externally registered Arrow data in all cases |
+| **Polars** | In-memory sort (eager mode) / streaming (lazy) | In-memory hash join | Unbounded for eager; streaming mode has limited buffering | ❌ | Process killed. Streaming mode helps for some pipelines but not for sort/join requiring global state |
+| **pandas** | `df.sort_values()` — full materialization | `df.merge()` — full materialization | Unbounded | ❌ | Process killed |
+
+### 9.4 Why DuckDB's Spill Doesn't Fully Solve the Problem
+
+DuckDB does have internal memory management and can spill to disk for its own operations.
+However, the issue is at the **API boundary**:
+
+```python
+# DuckDB native query (spill works):
+con.execute("SELECT * FROM read_parquet('s3://bucket/file.parquet') ORDER BY col")
+# DuckDB controls the entire pipeline — can spill internally ✓
+
+# DuckDB with registered Arrow data (spill may not work):
+big_arrow_table = pa.table(...)  # 20GB already in RAM
+con.register("data", big_arrow_table)
+con.execute("SELECT * FROM data ORDER BY col")
+# The 20GB is ALREADY in RAM (owned by PyArrow). DuckDB can't "un-materialize" it.
+# DuckDB's internal spill doesn't help because the input is already materialized.
+```
+
+The fundamental issue: **DuckDB's spill works for DuckDB-native I/O (reading Parquet
+directly), but if you hand it an already-materialized Arrow table, the data is already
+in RAM.** The OOM happened before DuckDB saw the data.
+
+DataFusion solves this differently:
+
+```python
+# DataFusion reads Parquet directly — never fully materializes in RAM
+ctx.register_parquet("data", "s3://bucket/file.parquet")
+ctx.sql("SELECT * FROM data ORDER BY col")
+# DataFusion streams batches from Parquet, sorts them in bounded memory,
+# spills sorted runs to disk, and merges. The full 20GB is NEVER in RAM.
+```
+
+### 9.5 The Critical Distinction: Who Controls the Read Pipeline
+
+```mermaid
+graph LR
+    subgraph "PyArrow approach (OOMs)"
+        PA_READ["PyArrow reads entire<br/>file into RAM"] --> PA_SORT["PyArrow sorts<br/>(needs full data in RAM)"]
+    end
+
+    subgraph "DuckDB approach (partial spill)"
+        DDB_READ["DuckDB reads file<br/>in streaming batches"] --> DDB_SORT["DuckDB sorts<br/>(can spill internally)"]
+        DDB_NOTE["⚠️ Only works when DuckDB<br/>controls the read pipeline"]
+    end
+
+    subgraph "DataFusion approach (full bounded)"
+        DF_READ["DataFusion reads file<br/>in streaming batches"] --> DF_SORT["DataFusion sorts<br/>(explicit FairSpillPool)"]
+        DF_SPILL["Spill runs → local SSD<br/>as Arrow IPC"]
+        DF_SORT --> DF_SPILL
+        DF_SPILL --> DF_MERGE["k-way merge<br/>(bounded memory)"]
+    end
+```
+
+### 9.6 Formal Memory Bounds Per Library
+
+Let `N` = total data size, `M` = available/configured memory, `B` = batch size:
+
+| Library | Memory for sort(N) | Memory for join(L, R) | Bounded? |
+|---------|-------------------|----------------------|:---:|
+| **PyArrow** | `O(N)` — full data in RAM | N/A (no join) | ❌ |
+| **DataFusion** | `O(M)` — configurable, spills at limit | `O(M)` — Grace Hash partitions spill | ✅ |
+| **DuckDB** | `O(M)` when DuckDB reads; `O(N)` when Arrow pre-materialized | Same caveat | ⚠️ Conditional |
+| **Polars** | `O(N)` eager; `O(pipeline)` streaming (not full sort) | `O(min(L,R))` — build side must fit | ❌ for sort |
+| **pandas** | `O(N)` — always full materialization | `O(L + R)` | ❌ |
+
+**Theorem (Unique Suitability):** DataFusion is the only library where:
+```
+∀ operation ∈ {sort, join, filter, aggregate}:
+  memory(operation, N) = O(M)  where M is user-configurable
+  AND the library controls the read pipeline (Parquet → Arrow streaming)
+  AND spill uses Arrow IPC (zero-deserialization on read-back)
+  AND the Python API exposes memory configuration (RuntimeEnvBuilder)
+```
+
+DuckDB comes close but its Python API doesn't guarantee bounded memory for externally
+registered Arrow data, and its spill behavior is internal (not user-configurable per
+session in the same explicit way).
+
+### 9.7 The Python API Surface for Memory Configuration
+
+| Library | Python API for memory limit | Spill configuration | Usable for our case? |
+|---------|----------------------------|--------------------|----|
+| **DataFusion** | `RuntimeEnvBuilder().with_fair_spill_pool(bytes)` | `with_disk_manager_os()` — uses OS temp dir | ✅ Explicit, per-session |
+| **DuckDB** | `duckdb.connect().execute("SET memory_limit='4GB'")` | `SET temp_directory='/path'` | ⚠️ Works for DuckDB-native reads; unclear for registered Arrow |
+| **Polars** | None (no memory limit API) | None (no spill) | ❌ |
+| **PyArrow** | None (no memory limit API) | None (no spill) | ❌ |
+| **pandas** | None | None | ❌ |
+
+### 9.8 What This Means for Pluggable Backends
+
+The pluggable `ComputeBackend` protocol defined in Section 3.2 includes a `memory_limit`
+parameter on sort/join methods. This is how the contract ensures bounded execution:
+
+```python
+class ComputeBackend(Protocol):
+    def sort(self, data, sort_keys, memory_limit: int) -> Iterator[pa.RecordBatch]: ...
+    def anti_join(self, left, right, on, memory_limit: int) -> Iterator[pa.RecordBatch]: ...
+```
+
+**For DataFusion:** `memory_limit` maps directly to `FairSpillPool(memory_limit)`. ✅
+
+**For DuckDB:** `memory_limit` maps to `SET memory_limit`. Spill works when DuckDB
+controls the read. ⚠️ Must register files via `read_parquet()`, not via Arrow tables.
+
+**For Polars:** `memory_limit` cannot be honored — Polars has no spill mechanism.
+A Polars backend would need to document that it only works for data that fits in memory.
+It could NOT implement `ComputeBackend` fully for the OOM-prone operations. ❌
+
+**For PyArrow:** Same as Polars — no spill, `memory_limit` cannot be honored. ❌
+
+This is why DataFusion is the correct choice for the OOM problem: it's the only library
+that can **contractually guarantee** the `memory_limit` parameter is respected. DuckDB is
+a close second (with caveats about read pipeline control). Polars and PyArrow are
+structurally incapable of bounded-memory sort/join.
+
+### 9.9 Summary: The OOM Landscape
+
+```mermaid
+graph TD
+    subgraph "Can honor memory_limit for sort/join?"
+        DF_OK["DataFusion<br/>✅ FairSpillPool + DiskManager<br/>Explicit, configurable, guaranteed"]
+        DDB_PARTIAL["DuckDB<br/>⚠️ Internal spill works<br/>when DuckDB controls read pipeline"]
+        PL_NO["Polars<br/>❌ No spill-to-disk<br/>Streaming helps some pipelines<br/>but not global sort/join"]
+        PA_NO["PyArrow<br/>❌ No memory management<br/>Allocates until OOM"]
+    end
+
+    subgraph "Our requirement"
+        REQ["Sort 100GB with 512MB budget<br/>Anti-join 10M delete rows against 1B data rows<br/>Filter 1GB files without full materialization"]
+    end
+
+    REQ --> DF_OK
+    REQ -.->|"partial"| DDB_PARTIAL
+    REQ -.->|"impossible"| PL_NO
+    REQ -.->|"impossible"| PA_NO
+
+    style DF_OK fill:#9f9
+    style DDB_PARTIAL fill:#ff9
+    style PL_NO fill:#f99
+    style PA_NO fill:#f99
+```
+
+---
+
+## 10. Summary
 
 | Question | Answer |
 |----------|--------|
 | Can we decouple from Arrow the format? | **No** — it's the universal standard, in the public API, correct and permanent |
 | Can we decouple from `pyarrow` the library? | **Yes** — other libraries can read/write Parquet and compute on Arrow |
+| Do all libraries interop? | **Yes** — 25/25 permutations tested, all pass via Arrow C Data Interface |
 | Is the interface narrow? | Yes — ~7 methods, all Arrow-in/Arrow-out |
+| Can all backends honor `memory_limit`? | **No** — only DataFusion guarantees it. DuckDB partially. Polars/PyArrow cannot. |
 | Is refactoring the monolith feasible? | Yes, but large (3K lines) and best done after Phase 1 |
 | Should we build the pluggable interface now? | No — build DataFusion first, extract protocol after |
 | Does this change our immediate plan? | No — we write clean Arrow-based functions that ARE the implicit interface |
