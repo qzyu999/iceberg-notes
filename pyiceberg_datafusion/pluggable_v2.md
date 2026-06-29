@@ -384,6 +384,108 @@ memory within each machine. They compose without conflicting.
 
 ---
 
+## 6A. GPU Acceleration: CUDA, RAPIDS, and cuDF
+
+### 6A.1 What cuDF/RAPIDS Is
+
+[RAPIDS cuDF](https://github.com/rapidsai/cudf) is NVIDIA's GPU-accelerated DataFrame
+library. It implements the Arrow columnar format in GPU memory (device memory) and
+provides GPU-parallel sort, join, filter, and aggregation. It speaks the Arrow C Data
+Interface for CPU↔GPU exchange.
+
+### 6A.2 How It Relates to the Pluggable Architecture
+
+cuDF fits the same `ComputeBackend` protocol:
+
+```python
+# cuDF reads Parquet → GPU Arrow → GPU sort → CPU Arrow output
+import cudf
+
+gpu_df = cudf.read_parquet("s3://bucket/file.parquet")  # data lives on GPU
+sorted_gpu = gpu_df.sort_values("timestamp")            # GPU-parallel sort
+cpu_result = sorted_gpu.to_arrow()                      # GPU → CPU Arrow (device-to-host copy)
+```
+
+It could theoretically implement `ComputeBackend.sort()`:
+
+```python
+class CudfComputeBackend:
+    def sort(self, data, keys, memory_limit):
+        gpu_table = cudf.from_arrow(pa.Table.from_batches(list(data)))
+        sorted_gpu = gpu_table.sort_values(keys)
+        return iter(sorted_gpu.to_arrow().to_batches())
+```
+
+### 6A.3 Why It's Not a Candidate for PyIceberg's Compute Layer
+
+| Constraint | cuDF's status | Issue |
+|-----------|---------------|-------|
+| Hardware requirement | **NVIDIA GPU required** | PyIceberg can't assume GPU availability |
+| Spill-to-disk | ⚠️ Limited (Unified Memory / managed memory) | Not equivalent to DataFusion's explicit FairSpillPool |
+| Memory model | GPU VRAM (8-80GB, fixed) | Much smaller than system RAM + SSD for spill |
+| License | Apache 2.0 | ✅ No issue |
+| Python bindings | ✅ Yes | No issue |
+| pip-installable on any machine | ❌ Requires CUDA toolkit + NVIDIA drivers | Cannot be a default dependency |
+
+**The fundamental issue:** PyIceberg must work on any machine — laptops, CI servers,
+cloud VMs without GPUs, ARM devices. GPU acceleration is inherently opt-in and
+hardware-dependent. It cannot be the default compute backend.
+
+### 6A.4 Could cuDF Be an Optional Backend?
+
+Yes — under the pluggable architecture, a `CudfComputeBackend` is technically possible:
+
+```yaml
+# .pyiceberg.yaml (hypothetical future)
+execution:
+  compute-backend: cudf   # use GPU acceleration
+  memory-limit: 16GB      # GPU VRAM budget
+```
+
+However, practical challenges:
+- **GPU memory is limited** (8-80GB VRAM vs. 100GB-2TB local SSD for spill). For data
+  larger than GPU memory, cuDF doesn't have equivalent spill-to-disk. It would OOM on
+  the same operations DataFusion handles via SSD spill.
+- **Data transfer overhead:** CPU Arrow → GPU Arrow (PCIe copy, ~12-25 GB/s) adds
+  latency that may negate GPU compute gains for I/O-bound operations (which most
+  Iceberg maintenance ops are).
+- **Limited operations:** cuDF excels at DataFrame operations but doesn't have the
+  full query planning (predicate pushdown, projection pruning) that DataFusion provides.
+
+### 6A.5 The Correct Role for GPU in Iceberg Workflows
+
+GPU acceleration makes sense at the **query engine level** (Role A: user-facing queries),
+not at the **maintenance level** (Role B: internal compute):
+
+```python
+# Good use of GPU: user runs analytics query on Iceberg data via cuDF/RAPIDS
+import cudf
+gpu_df = cudf.read_parquet(table.scan().to_arrow())  # user choice
+result = gpu_df.groupby("category").agg({"revenue": "sum"})  # GPU-parallel
+
+# Less useful: PyIceberg internally uses GPU for compaction sort
+# (I/O-bound, SSD spill is cheaper than GPU memory management)
+```
+
+### 6A.6 Summary: cuDF's Position
+
+| Question | Answer |
+|----------|--------|
+| Can cuDF participate in Arrow interop? | ✅ Yes (Arrow C Data Interface, `to_arrow()`, `from_arrow()`) |
+| Can cuDF be an IOBackend? | ⚠️ Possible but impractical (Parquet → GPU → CPU adds overhead) |
+| Can cuDF be a ComputeBackend? | ⚠️ For data that fits in VRAM only. No spill-to-disk equivalent. |
+| Should PyIceberg use cuDF internally? | ❌ Not as default (hardware dependency, memory limits, I/O-bound ops) |
+| Could it be an optional community backend? | ✅ Yes, under the pluggable protocol. The architecture supports it. |
+| Does this affect our immediate plan? | ❌ No — cuDF is a future community contribution, not our scope |
+
+The pluggable architecture **does not exclude** GPU backends — it just doesn't depend
+on them. The `ComputeBackend` protocol is hardware-agnostic (Arrow in, Arrow out).
+If someone contributes a `CudfComputeBackend` that handles the CPU↔GPU transfer
+transparently, it would work within the protocol. But it's not a substitute for
+DataFusion's spill-to-disk capability for the general case.
+
+---
+
 ## 7. How the API Works
 
 ### 7.1 User-Facing: No Change
