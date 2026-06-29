@@ -977,6 +977,263 @@ graph TD
 
 ---
 
+## 9A. Arrow IPC: The Format That Enables Spill, Shuffle, and Cross-Process Exchange
+
+Arrow IPC (Inter-Process Communication) is the **serialization format** of the Arrow
+ecosystem. It's the bridge between Arrow's in-memory representation (RAM-only) and
+situations where data needs to leave a process's address space — spill to disk, send
+to another process, or stream across a network.
+
+Understanding Arrow IPC is essential because it's the mechanism that makes DataFusion's
+spill-to-disk work, Ray's distributed Arrow exchange work, and zero-deserialization
+reads from disk possible.
+
+### 9A.1 The Problem Arrow IPC Solves
+
+Arrow RecordBatch (the in-memory format) lives in RAM as raw memory buffers. But:
+- What if RAM is full and you need to spill to SSD? (DataFusion spill)
+- What if you need to send Arrow data to another process? (Ray worker exchange)
+- What if you want to cache Arrow data on disk for fast reload? (memory-mapped reads)
+
+You need a way to **write Arrow data to bytes** (for disk/network) and **read it back**
+(into memory) — ideally with zero or near-zero overhead.
+
+That's Arrow IPC: a byte format that is a 1:1 mapping of Arrow's in-memory layout.
+
+### 9A.2 How Arrow IPC Works (For Python Developers)
+
+Arrow IPC writes RecordBatches to bytes in a format that is essentially identical to
+how they sit in RAM:
+
+```python
+# In-memory Arrow RecordBatch:
+# RAM Layout: [Schema metadata] [Validity bitmap] [Offsets buffer] [Values buffer]
+
+# Arrow IPC on disk/wire:
+# Byte Layout: [Schema message] [Validity bitmap bytes] [Offsets bytes] [Values bytes]
+# (Plus: length prefixes and alignment padding)
+```
+
+The key property: **the byte layout on disk is the same as the byte layout in RAM**
+(modulo alignment padding). This means:
+
+```python
+# Writing Arrow IPC — just dump the memory buffers to bytes
+import pyarrow as pa
+
+table = pa.table({"id": [1, 2, 3], "name": ["Alice", "Bob", "Charlie"]})
+
+# Write to IPC file (the bytes ARE the memory layout)
+with pa.ipc.new_file("/tmp/spill.arrow", table.schema) as writer:
+    writer.write_table(table)
+
+# Read back — essentially a pointer assignment (mmap), not deserialization
+source = pa.memory_map("/tmp/spill.arrow", "r")
+reader = pa.ipc.open_file(source)
+recovered_table = reader.read_all()  # ← zero-copy via memory map!
+```
+
+### 9A.3 The Three Arrow Serialization Formats (Comparison)
+
+| Format | Purpose | Overhead | Read speed | Used for |
+|--------|---------|----------|------------|----------|
+| **Arrow IPC (File)** | Store RecordBatches on disk | Near-zero (alignment only) | Near-memcpy speed (mmap) | DataFusion spill, caching |
+| **Arrow IPC (Stream)** | Send RecordBatches over wire | Near-zero (no random access) | Sequential scan | Ray worker exchange, streaming |
+| **Parquet** | Compressed columnar storage | Encoding + compression (CPU-intensive) | Slower (must decode) | Long-term storage (S3/GCS) |
+
+**Critical insight:** Arrow IPC is NOT Parquet. They serve different purposes:
+
+```
+Parquet: optimized for STORAGE (small on disk, expensive to read)
+Arrow IPC: optimized for SPEED (larger on disk, trivial to read)
+```
+
+### 9A.4 How DataFusion Uses Arrow IPC for Spill-to-Disk
+
+When DataFusion's `SortExec` runs out of memory budget, it spills sorted runs to
+local SSD as Arrow IPC files:
+
+```mermaid
+graph TD
+    subgraph "RAM (bounded by FairSpillPool)"
+        BATCH["Incoming RecordBatches<br/>(from Parquet reader)"]
+        SORT_BUF["Sort buffer<br/>(accumulates until memory_limit)"]
+    end
+
+    subgraph "Local SSD (unbounded overflow)"
+        RUN1["sorted_run_001.arrow<br/>(Arrow IPC file)"]
+        RUN2["sorted_run_002.arrow<br/>(Arrow IPC file)"]
+        RUN3["sorted_run_003.arrow<br/>(Arrow IPC file)"]
+    end
+
+    subgraph "Final merge (bounded RAM)"
+        MERGE["k-way merge<br/>(reads one batch per run)"]
+        OUTPUT["Sorted output stream<br/>(RecordBatch iterator)"]
+    end
+
+    BATCH --> SORT_BUF
+    SORT_BUF -->|"memory_limit hit →<br/>sort + flush"| RUN1
+    SORT_BUF -->|"memory_limit hit →<br/>sort + flush"| RUN2
+    SORT_BUF -->|"memory_limit hit →<br/>sort + flush"| RUN3
+    RUN1 --> MERGE
+    RUN2 --> MERGE
+    RUN3 --> MERGE
+    MERGE --> OUTPUT
+```
+
+**Step by step:**
+1. DataFusion reads Parquet batches, accumulates in sort buffer (RAM)
+2. When `FairSpillPool` says "no more memory" → sort the buffer in-memory
+3. Write the sorted run to local SSD as Arrow IPC file (fast: just dump bytes)
+4. Clear RAM buffer, continue reading next batches
+5. Repeat until all input consumed (may produce many sorted runs)
+6. Merge phase: open all IPC files, read one batch from each, k-way merge
+7. Output: sorted RecordBatch stream with O(k × batch_size) memory
+
+**Why Arrow IPC for spill (not Parquet)?**
+
+| Property | Arrow IPC | Parquet |
+|----------|-----------|---------|
+| Write speed | ~7 GB/s (NVMe SSD speed — just dump bytes) | ~1-2 GB/s (must encode + compress) |
+| Read speed | ~7 GB/s (mmap or sequential read) | ~1-2 GB/s (must decompress + decode) |
+| File size | ~1x of in-memory size (no compression) | ~0.3x (compressed) |
+| CPU usage | Near-zero (memcpy-level) | Significant (encoding/decoding) |
+| Purpose | Temporary spill (speed matters, size doesn't) | Long-term storage (size matters, speed doesn't) |
+
+For spill-to-disk, **speed dominates size**. The spilled data is temporary (deleted
+after the sort completes). Writing it as Parquet would add 5-7x CPU overhead for
+compression that buys nothing — the file exists for seconds, not days.
+
+### 9A.5 How Ray Uses Arrow IPC for Distributed Exchange
+
+When Ray sends Arrow data between workers, it uses Arrow IPC (streaming format):
+
+```mermaid
+graph LR
+    subgraph "Worker A (Machine 1)"
+        W1_DATA["RecordBatch (RAM)"]
+        W1_SER["Arrow IPC serialize<br/>(dump bytes)"]
+    end
+
+    subgraph "Network / Shared Memory"
+        WIRE["Arrow IPC bytes<br/>(on wire or plasma store)"]
+    end
+
+    subgraph "Worker B (Machine 2)"
+        W2_DESER["Arrow IPC deserialize<br/>(cast pointer)"]
+        W2_DATA["RecordBatch (RAM)"]
+    end
+
+    W1_DATA --> W1_SER --> WIRE --> W2_DESER --> W2_DATA
+```
+
+This is why distributed Arrow frameworks are fast: the serialization format is
+essentially the same as the in-memory layout. No decode step. On shared-memory
+systems (same machine), it's truly zero-copy via Plasma/shared memory.
+
+### 9A.6 Arrow IPC in the Context of PyIceberg's Architecture
+
+```mermaid
+graph TB
+    subgraph "Long-term storage (S3/GCS)"
+        PARQUET["Parquet files<br/>(compressed, ~0.3x size)<br/>Format: encoded + compressed columnar"]
+    end
+
+    subgraph "RAM (bounded by memory_limit)"
+        ARROW_MEM["Arrow RecordBatch<br/>(uncompressed, full size)<br/>Format: raw column buffers"]
+    end
+
+    subgraph "Local SSD (spill overflow)"
+        ARROW_IPC["Arrow IPC files<br/>(uncompressed, ~1x size)<br/>Format: byte dump of RAM layout"]
+    end
+
+    subgraph "Network (distributed exchange)"
+        ARROW_STREAM["Arrow IPC Stream<br/>(uncompressed, sequential)<br/>Format: byte stream of batches"]
+    end
+
+    PARQUET -->|"Read: decode+decompress<br/>(CPU intensive, 1-2 GB/s)"| ARROW_MEM
+    ARROW_MEM -->|"Spill: dump bytes<br/>(trivial, NVMe speed 7 GB/s)"| ARROW_IPC
+    ARROW_IPC -->|"Read back: mmap/read<br/>(trivial, NVMe speed 7 GB/s)"| ARROW_MEM
+    ARROW_MEM -->|"Send: dump bytes<br/>(trivial)"| ARROW_STREAM
+    ARROW_STREAM -->|"Receive: cast pointer<br/>(trivial)"| ARROW_MEM
+    ARROW_MEM -->|"Write: encode+compress<br/>(CPU intensive, 1-2 GB/s)"| PARQUET
+```
+
+**The complete data flow for a compaction with spill:**
+
+```
+1. DataFusion reads Parquet from S3      (slow: decompress, ~1 GB/s)
+2. Sorts batches in RAM                  (fast: in-memory)
+3. Spills sorted runs to SSD as IPC      (fast: NVMe write, ~7 GB/s)
+4. Reads runs back for merge             (fast: NVMe read, ~7 GB/s)
+5. Outputs sorted batches                (in RAM, zero-copy to writer)
+6. PyArrow writes Parquet to S3          (slow: compress + encode, ~1 GB/s)
+```
+
+Steps 3-4 are the spill cycle. They use Arrow IPC specifically because it's a
+zero-overhead format — the bytes on SSD are the same bytes that were in RAM.
+Reading back is just "point at these bytes" (memory-map), not "decode these bytes"
+(Parquet).
+
+### 9A.7 The Speed-of-Light for Spill
+
+For a 10GB sort with 2GB memory budget on NVMe SSD:
+
+```
+Sorted runs generated: ⌈10GB / 2GB⌉ = 5 runs
+Data written to SSD:   10GB × 1 (IPC is uncompressed)
+Data read from SSD:    10GB × 1 (merge reads all runs)
+Total SSD I/O:         20GB
+
+T_spill = 20GB / 7GB/s (NVMe) ≈ 2.9 seconds
+
+Compare to:
+T_parquet_read  = 10GB_compressed / 1GB/s ≈ 10 seconds (reading input from S3)
+T_parquet_write = 10GB_compressed / 1GB/s ≈ 10 seconds (writing output to S3)
+T_total ≈ 10 + 2.9 + 10 = 23 seconds
+```
+
+The spill adds ~13% to total operation time. Without spill, the operation requires
+10GB RAM or crashes. The tradeoff: 13% slower, but works with any memory budget
+(even 512MB — just more spill passes).
+
+### 9A.8 Arrow IPC vs. Parquet: When to Use Each
+
+| Situation | Use | Why |
+|-----------|-----|-----|
+| Store data long-term (S3/GCS) | **Parquet** | Compression saves 70% storage cost |
+| Spill intermediate data to local SSD | **Arrow IPC** | Speed: 7x faster write than Parquet |
+| Send data between processes (Ray) | **Arrow IPC Stream** | Zero-deserialization on receive |
+| Cache hot data on local SSD | **Arrow IPC** | Near-RAM speed on read-back |
+| Exchange between libraries in-process | **Arrow C Data Interface** | Zero-copy (no I/O at all) |
+
+PyIceberg's architecture uses ALL of these at different levels:
+- **Parquet** for permanent storage (what Iceberg tables store)
+- **Arrow IPC** for DataFusion's spill (temporary, local SSD)
+- **Arrow C Data Interface** for library-to-library exchange (in-memory, zero-copy)
+- **Arrow IPC Stream** potentially for distributed exchange (future, if Ray integration)
+
+### 9A.9 How This Connects to the Pluggable Architecture
+
+The pluggable `ComputeBackend` protocol doesn't need to know about Arrow IPC.
+That's an internal implementation detail of backends that support spill:
+
+```python
+class ComputeBackend(Protocol):
+    def sort(self, data, keys, memory_limit) -> Iterator[pa.RecordBatch]: ...
+    # ↑ The caller doesn't know whether the backend spilled to IPC files.
+    # That's hidden inside the DataFusion implementation.
+```
+
+However, Arrow IPC is the **reason** DataFusion can honor `memory_limit`:
+- Without Arrow IPC → no efficient spill format → must keep everything in RAM → OOM
+- With Arrow IPC → spill is just "dump bytes to SSD" → resume later → bounded memory
+
+Libraries that don't use Arrow IPC for spill (Polars, PyArrow) have no path to
+bounded-memory execution for operations requiring global state (sort, join).
+
+---
+
 ## 10. Execution Scope: Single-Node, Distributed, and the Boundaries
 
 ### 10.1 PyIceberg's Execution Model
