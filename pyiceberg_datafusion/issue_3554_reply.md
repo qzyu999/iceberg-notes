@@ -4,6 +4,23 @@
 
 Thanks @kevinjqliu — I explored this direction in depth. Here's what I found:
 
+## Current State: How PyArrow Is Coupled
+
+Today, `pyiceberg/io/pyarrow.py` (3,046 lines) is a monolith handling six distinct responsibilities through direct `pyarrow` API calls:
+
+| Responsibility | What it does | Lines | Interface? |
+|---|---|---|---|
+| **FileIO** | S3/GCS/local access via `pyarrow.fs` | ~300 | ✅ Already behind `FileIO` ABC |
+| **Schema conversion** | Iceberg Schema ↔ Arrow Schema (visitor pattern) | ~800 | Shared infra — all backends need this |
+| **Expression conversion** | Iceberg filter → `pc.Expression` | ~200 | Backend-specific |
+| **Parquet reading** | `pq.ParquetFile` + `Scanner` → `RecordBatch` | ~200 | ❌ Hardcoded to PyArrow |
+| **Parquet writing** | `pq.ParquetWriter` → DataFile metadata | ~400 | ❌ Hardcoded to PyArrow |
+| **Compute** | `pa.Table.sort_by()`, `pc.is_in()`, delete application | ~300 | ❌ Hardcoded + structurally limited (no join, no spill) |
+
+The coupling isn't just "we import pyarrow" — it's that read, write, compute, schema, and expression handling are all interleaved in one file with no separation. Testing the semantic layer (scan planning, commit logic) requires real Parquet files because there's no way to mock the I/O.
+
+The schema conversion (800 lines) is NOT coupling to PyArrow specifically — it converts between Iceberg's type system and the Arrow format's type system. Every backend needs this since they all use Arrow. It stays regardless of what we plug in.
+
 ## The Key Insight: Read/Write vs. Compute Are Different Problems
 
 All candidate libraries (PyArrow, DataFusion, DuckDB, Polars) produce **identical Arrow output** for Parquet reads. The Parquet spec defines a deterministic decode algorithm — given the same file, same projection, same filter, any correct implementation produces the same RecordBatches. Reading is I/O-bound (94% network time for S3), so swapping who reads doesn't produce a user-visible improvement.
