@@ -834,58 +834,107 @@ ctx.sql("SELECT * FROM big_table ORDER BY col")
 | **Polars** | In-memory sort (eager mode) / streaming (lazy) | In-memory hash join | Unbounded for eager; streaming mode has limited buffering | ❌ | Process killed. Streaming mode helps for some pipelines but not for sort/join requiring global state |
 | **pandas** | `df.sort_values()` — full materialization | `df.merge()` — full materialization | Unbounded | ❌ | Process killed |
 
-### 9.4 Why DuckDB's Spill Doesn't Fully Solve the Problem
+### 9.4 DuckDB vs. DataFusion: An Honest Comparison
 
-DuckDB does have internal memory management and can spill to disk for its own operations.
-However, the issue is at the **API boundary**:
+DuckDB has internal memory management and CAN spill to disk. When DuckDB reads Parquet
+files directly and sorts them, it works with bounded memory — the same as DataFusion:
 
 ```python
-# DuckDB native query (spill works):
+# DuckDB reads Parquet + sorts with bounded memory — WORKS:
+con = duckdb.connect()
+con.execute("SET memory_limit = '2GB'")
 con.execute("SELECT * FROM read_parquet('s3://bucket/file.parquet') ORDER BY col")
-# DuckDB controls the entire pipeline — can spill internally ✓
+# DuckDB streams from Parquet, sorts with internal buffer management, spills if needed ✓
 
-# DuckDB with registered Arrow data (spill may not work):
-big_arrow_table = pa.table(...)  # 20GB already in RAM
-con.register("data", big_arrow_table)
-con.execute("SELECT * FROM data ORDER BY col")
-# The 20GB is ALREADY in RAM (owned by PyArrow). DuckDB can't "un-materialize" it.
-# DuckDB's internal spill doesn't help because the input is already materialized.
-```
-
-The fundamental issue: **DuckDB's spill works for DuckDB-native I/O (reading Parquet
-directly), but if you hand it an already-materialized Arrow table, the data is already
-in RAM.** The OOM happened before DuckDB saw the data.
-
-DataFusion solves this differently:
-
-```python
-# DataFusion reads Parquet directly — never fully materializes in RAM
+# DataFusion reads Parquet + sorts with bounded memory — ALSO WORKS:
+ctx = SessionContext(runtime=RuntimeEnvBuilder().with_fair_spill_pool(2_000_000_000))
 ctx.register_parquet("data", "s3://bucket/file.parquet")
 ctx.sql("SELECT * FROM data ORDER BY col")
-# DataFusion streams batches from Parquet, sorts them in bounded memory,
-# spills sorted runs to disk, and merges. The full 20GB is NEVER in RAM.
+# DataFusion streams from Parquet, sorts with FairSpillPool, spills if needed ✓
 ```
 
-### 9.5 The Critical Distinction: Who Controls the Read Pipeline
+**For this specific pattern (`register_parquet` → compute), both are functionally
+equivalent.** The distinction is NOT that DuckDB can't do it — it can.
 
-```mermaid
-graph LR
-    subgraph "PyArrow approach (OOMs)"
-        PA_READ["PyArrow reads entire<br/>file into RAM"] --> PA_SORT["PyArrow sorts<br/>(needs full data in RAM)"]
-    end
+### 9.5 Why DataFusion Over DuckDB (Honest Reasons)
 
-    subgraph "DuckDB approach (partial spill)"
-        DDB_READ["DuckDB reads file<br/>in streaming batches"] --> DDB_SORT["DuckDB sorts<br/>(can spill internally)"]
-        DDB_NOTE["⚠️ Only works when DuckDB<br/>controls the read pipeline"]
-    end
+The selection of DataFusion over DuckDB is based on these concrete differences:
 
-    subgraph "DataFusion approach (full bounded)"
-        DF_READ["DataFusion reads file<br/>in streaming batches"] --> DF_SORT["DataFusion sorts<br/>(explicit FairSpillPool)"]
-        DF_SPILL["Spill runs → local SSD<br/>as Arrow IPC"]
-        DF_SORT --> DF_SPILL
-        DF_SPILL --> DF_MERGE["k-way merge<br/>(bounded memory)"]
-    end
+**1. License compatibility (the hard constraint)**
+
+| | DataFusion | DuckDB |
+|--|---|---|
+| Core | Apache 2.0 | MIT |
+| S3/GCS extensions (`httpfs`) | Apache 2.0 (part of `object_store` crate) | **Business Source License** (proprietary) |
+| PyIceberg compatibility | ✅ Apache project can depend on Apache-licensed code | ⚠️ Apache project depending on BSL extension for core functionality raises governance concerns |
+
+For an Apache Software Foundation project, all mandatory runtime dependencies should
+be Apache-compatible. DuckDB's core is MIT (fine), but its `httpfs` extension (needed
+for S3/GCS access) is under the Business Source License — a non-open-source license.
+DataFusion's object store access is fully Apache 2.0.
+
+**2. Per-session memory isolation**
+
+```python
+# DataFusion: each SessionContext has its own independent memory pool
+ctx_compact = SessionContext(runtime=RuntimeEnvBuilder().with_fair_spill_pool(4_GB))
+ctx_small   = SessionContext(runtime=RuntimeEnvBuilder().with_fair_spill_pool(256_MB))
+# Two completely independent memory budgets, no interaction
+
+# DuckDB: memory_limit is connection-wide
+con = duckdb.connect()
+con.execute("SET memory_limit = '4GB'")
+# ALL queries on this connection share the same 4GB — no per-operation control
 ```
+
+When PyIceberg runs multiple operations (e.g., compact + resolve deletes in sequence),
+DataFusion allows different memory budgets per operation. DuckDB's is global per
+connection.
+
+**3. Multi-operator fairness (FairSpillPool)**
+
+DataFusion's `FairSpillPool` explicitly divides memory among concurrent spillable
+operators within a single plan:
+
+```
+Plan: HashJoinExec + SortExec (e.g., equality delete resolution + sort)
+FairSpillPool(1GB): each operator gets 500MB, both spill independently
+
+DuckDB: internal buffer manager allocates dynamically
+         — works but guarantees are less explicit from the Python API
+```
+
+**4. Arrow-native internal format**
+
+DataFusion's internal data representation IS Arrow RecordBatch. When PyIceberg
+passes data to DataFusion or gets results back, there is zero format conversion.
+
+DuckDB has its own internal columnar format. At the boundary:
+- `con.register("data", arrow_table)` → DuckDB may copy into its own format
+- `.fetch_arrow_table()` → DuckDB converts back to Arrow
+
+For operations that interleave with PyIceberg's Arrow-native pipeline (read Arrow →
+compute → pass Arrow to writer), DataFusion avoids these conversion hops.
+
+**5. Existing ecosystem integration**
+
+PyIceberg already has `pyiceberg-core` which is built on `iceberg-rust`, which uses
+`iceberg-datafusion`. The `datafusion` optional extra already exists in `pyproject.toml`.
+The `__datafusion_table_provider__` protocol is already implemented. DataFusion is
+already part of the PyIceberg ecosystem; DuckDB is not.
+
+### 9.5.1 What DuckDB Does Better
+
+To be fair — DuckDB has strengths DataFusion doesn't:
+
+- **Simpler Python API**: `duckdb.sql("SELECT ...")` is more concise than DataFusion's `SessionContext` setup
+- **Automatic parallelism**: DuckDB auto-parallelizes without explicit `target_partitions` config
+- **Broader SQL support**: DuckDB's SQL dialect is richer (window functions, complex expressions)
+- **In-process performance for small data**: DuckDB is highly optimized for fast single-query execution
+
+If the only concern were "fastest sort/join for typical data sizes," DuckDB might win.
+But the architectural constraints (Apache license, per-session memory control, Arrow-
+native format, existing ecosystem integration) tip the balance to DataFusion.
 
 ### 9.6 Formal Memory Bounds Per Library
 
@@ -895,19 +944,24 @@ Let `N` = total data size, `M` = available/configured memory, `B` = batch size:
 |---------|-------------------|----------------------|:---:|
 | **PyArrow** | `O(N)` — full data in RAM | N/A (no join) | ❌ |
 | **DataFusion** | `O(M)` — configurable, spills at limit | `O(M)` — Grace Hash partitions spill | ✅ |
-| **DuckDB** | `O(M)` when DuckDB reads; `O(N)` when Arrow pre-materialized | Same caveat | ⚠️ Conditional |
+| **DuckDB** | `O(M)` — configurable, spills when controlling read pipeline | `O(M)` — same caveat | ✅ (with caveats above) |
 | **Polars** | `O(N)` eager; `O(pipeline)` streaming (not full sort) | `O(min(L,R))` — build side must fit | ❌ for sort |
 | **pandas** | `O(N)` — always full materialization | `O(L + R)` | ❌ |
 
-**Theorem (Unique Suitability):** DataFusion is the only library where:
+**Corrected assessment:** Both DataFusion and DuckDB can provide `O(M)` bounded memory
+for sort/join when they control the read pipeline. The choice between them is based on
+**license, API design, and ecosystem fit** — not on a fundamental capability gap.
+
+**Theorem (Why DataFusion):** DataFusion is selected because it is the only library where:
 ```
-∀ operation ∈ {sort, join, filter, aggregate}:
-  memory(operation, N) = O(M)  where M is user-configurable
-  AND the library controls the read pipeline (Parquet → Arrow streaming)
-  AND spill uses Arrow IPC (zero-deserialization on read-back)
-  AND the Python API exposes memory configuration (RuntimeEnvBuilder)
+Apache-2.0 licensed (including object store access)
+∧ Per-session configurable memory pool (FairSpillPool)
+∧ Arrow-native internal format (zero conversion overhead)
+∧ Already integrated in PyIceberg ecosystem (pyiceberg-core, pyproject.toml)
+∧ Python API exposes explicit memory configuration (RuntimeEnvBuilder)
 ```
 
+DuckDB satisfies all except the first (BSL for `httpfs`) and fourth (not in ecosystem).
 DuckDB comes close but its Python API doesn't guarantee bounded memory for externally
 registered Arrow data, and its spill behavior is internal (not user-configurable per
 session in the same explicit way).
