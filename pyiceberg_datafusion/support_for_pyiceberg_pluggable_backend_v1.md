@@ -413,7 +413,7 @@ We have one implementation (PyArrow). We're building a second (DataFusion). The 
 
 **Phase 1 (Now):** Build DataFusion compute in `pyiceberg/execution/compute.py`. Function signatures ARE the implicit interface (Arrow-in, Arrow-out). No protocol extraction yet. Delivers immediate value (bounded-memory operations).
 
-**Phase 2 (After Phase 1 proven):** Extract `IOBackend` + `ComputeBackend` protocols from the two concrete implementations. Refactor `pyiceberg/io/pyarrow.py` into `PyArrowBackend`. Pure refactoring — no behavior change.
+**Phase 2 (After Phase 1 proven locally):** Extract `IOBackend` + `ComputeBackend` protocols from the two concrete implementations. Refactor `pyiceberg/io/pyarrow.py` into `PyArrowBackend`. Pure refactoring — no behavior change.
 
 **Phase 3 (Community-driven):** Additional backends (DuckDB, Polars, cuDF) contributed by the community against the stable protocol.
 
