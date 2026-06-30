@@ -786,40 +786,195 @@ The discovery notes from Phase 0 serve as the implementation guide.
 
 ### 7.5 The Backend Resolution Logic
 
+The resolution follows a **explicit-over-implicit** principle: if the user has specified
+a preference, honor it. If not, fall back to sensible auto-detection.
+
+#### 7.5.1 The Problem with Pure Auto-Detection
+
+```python
+# NAIVE (problematic):
+def resolve_backend():
+    try:
+        import datafusion  # installed, so use it?
+    ...
+```
+
+This is fragile because:
+- Users install many libraries for unrelated reasons (DuckDB for ad-hoc queries,
+  Polars for a different project). Detecting their presence doesn't mean they want
+  PyIceberg to use them.
+- Auto-detection makes behavior **non-deterministic**: adding/removing a pip package
+  changes PyIceberg's internal execution path silently. This violates the principle
+  of least surprise.
+- In CI/Docker environments, the set of installed packages varies unpredictably.
+
+#### 7.5.2 The Resolution Hierarchy
+
+Resolution follows a strict precedence order (highest wins):
+
+```
+1. Explicit per-call override     →  table.compact(backend="datafusion")
+2. Explicit config (.pyiceberg.yaml) →  execution.compute-backend: datafusion
+3. Environment variable           →  PYICEBERG_EXECUTION__COMPUTE_BACKEND=datafusion
+4. Auto-detection (default)       →  detect what's installed, use best available
+```
+
+**For casual users (levels 3-4):** Everything just works. If they `pip install
+'pyiceberg[datafusion]'`, auto-detection picks it up. If not, PyArrow is used.
+No config needed.
+
+**For power users (levels 1-2):** Explicit control. They choose exactly which backend
+handles their operations, independent of what's installed.
+
+#### 7.5.3 Implementation
+
 ```python
 # pyiceberg/execution/engine.py
 
-def resolve_backend(operation: str) -> tuple[IOBackend, ComputeBackend]:
-    """Resolve the best available backends.
+_REQUIRES_BOUNDED_MEMORY = {
+    "compaction", "equality_delete_resolution", "orphan_file_deletion",
+    "upsert", "cow_rewrite", "position_delete_compaction",
+}
 
-    Priority (highest first):
-      1. DataFusion — bounded memory, Apache 2.0, Arrow-native
-      2. PyArrow — always available, fallback (in-memory only)
+def resolve_backend(
+    operation: str,
+    *,
+    io_override: str | None = None,
+    compute_override: str | None = None,
+) -> tuple[IOBackend, ComputeBackend]:
+    """Resolve backends with explicit-over-implicit precedence.
 
-    Future (added by subsequent PRs):
-      - DuckDB — bounded memory, but BSL license concern
-      - Polars — IO only (no bounded compute)
-      - cuDF — GPU compute (hardware-dependent)
+    Args:
+        operation: Name of the operation (for warnings/errors).
+        io_override: Explicit IO backend choice (from config or per-call).
+        compute_override: Explicit compute backend choice (from config or per-call).
+
+    Returns:
+        Tuple of (IOBackend, ComputeBackend) for the operation.
+
+    Raises:
+        UnsupportedOperation: If a non-spill backend is explicitly chosen for
+            an operation that requires bounded memory.
     """
-    try:
-        from pyiceberg.execution.backends.datafusion_backend import (
-            DataFusionIOBackend, DataFusionComputeBackend
-        )
-        return DataFusionIOBackend(), DataFusionComputeBackend()
-    except ImportError:
-        pass
+    # Read config if no per-call override
+    config = Config()
+    io_choice = io_override or config.config.get("execution", {}).get("io-backend", "auto")
+    compute_choice = compute_override or config.config.get("execution", {}).get("compute-backend", "auto")
 
-    from pyiceberg.execution.backends.pyarrow_backend import (
-        PyArrowIOBackend, PyArrowComputeBackend
-    )
-    if operation in _REQUIRES_BOUNDED_MEMORY:
-        warnings.warn(
-            f"'{operation}' using PyArrow (in-memory, may OOM on large data). "
-            f"Install 'pyiceberg[datafusion]' for bounded-memory execution.",
-            UserWarning, stacklevel=3,
-        )
-    return PyArrowIOBackend(), PyArrowComputeBackend()
+    io_backend = _resolve_io(io_choice)
+    compute_backend = _resolve_compute(compute_choice)
+
+    # Capability gate: warn/error if bounded memory required but not available
+    if operation in _REQUIRES_BOUNDED_MEMORY and not compute_backend.supports_bounded_memory:
+        if compute_choice != "auto":
+            # User explicitly chose a non-spill backend — error, don't silently degrade
+            raise UnsupportedOperation(
+                f"'{operation}' requires bounded-memory execution, but backend "
+                f"'{compute_choice}' does not support spill-to-disk. "
+                f"Use 'datafusion' or remove the explicit backend override."
+            )
+        else:
+            # Auto-detected non-spill backend — warn with install instructions
+            warnings.warn(
+                f"'{operation}' using '{compute_choice}' (may OOM on large data). "
+                f"Install 'pyiceberg[datafusion]' for bounded-memory execution.",
+                UserWarning, stacklevel=3,
+            )
+
+    return io_backend, compute_backend
+
+
+def _resolve_io(choice: str) -> IOBackend:
+    if choice == "auto":
+        # Default: PyArrow (always available, read/write equivalent across libs)
+        return PyArrowIOBackend()
+    elif choice == "datafusion":
+        from pyiceberg.execution.backends.datafusion_backend import DataFusionIOBackend
+        return DataFusionIOBackend()
+    elif choice == "duckdb":
+        from pyiceberg.execution.backends.duckdb_backend import DuckDBIOBackend
+        return DuckDBIOBackend()
+    elif choice == "pyarrow":
+        return PyArrowIOBackend()
+    else:
+        raise ValueError(f"Unknown IO backend: '{choice}'. Options: auto, pyarrow, datafusion, duckdb")
+
+
+def _resolve_compute(choice: str) -> ComputeBackend:
+    if choice == "auto":
+        # Auto-detect: prefer DataFusion if installed
+        try:
+            from pyiceberg.execution.backends.datafusion_backend import DataFusionComputeBackend
+            return DataFusionComputeBackend()
+        except ImportError:
+            return PyArrowComputeBackend()
+    elif choice == "datafusion":
+        from pyiceberg.execution.backends.datafusion_backend import DataFusionComputeBackend
+        return DataFusionComputeBackend()
+    elif choice == "duckdb":
+        from pyiceberg.execution.backends.duckdb_backend import DuckDBComputeBackend
+        return DuckDBComputeBackend()
+    elif choice == "pyarrow":
+        return PyArrowComputeBackend()
+    else:
+        raise ValueError(f"Unknown compute backend: '{choice}'. Options: auto, pyarrow, datafusion, duckdb")
 ```
+
+#### 7.5.4 Configuration Examples
+
+```yaml
+# .pyiceberg.yaml — Power user explicit config
+
+# Use DataFusion for compute (bounded memory), PyArrow for IO
+execution:
+  compute-backend: datafusion
+  io-backend: pyarrow
+  memory-limit: 2GB
+
+# Or: Use DuckDB for everything
+execution:
+  compute-backend: duckdb
+  io-backend: duckdb
+  memory-limit: 4GB
+
+# Or: Explicit PyArrow only (small tables, no extra deps needed)
+execution:
+  compute-backend: pyarrow
+  io-backend: pyarrow
+```
+
+```python
+# Per-call override (rare, for specific operations):
+table.compact(compute_backend="datafusion", memory_limit="4GB")
+```
+
+#### 7.5.5 What Happens for Each User Profile
+
+| User | Config | Installed | Resolution |
+|------|--------|-----------|------------|
+| Casual (defaults) | None | Just pyiceberg | IO: PyArrow, Compute: PyArrow |
+| Casual + datafusion extra | None | pyiceberg + datafusion | IO: PyArrow, Compute: DataFusion (auto-detected) |
+| Power user (explicit) | `compute-backend: datafusion` | pyiceberg + datafusion | IO: PyArrow, Compute: DataFusion (explicit) |
+| Power user (explicit) | `compute-backend: duckdb` | pyiceberg + duckdb | IO: PyArrow, Compute: DuckDB (explicit) |
+| Has DuckDB installed for other work | None | pyiceberg + duckdb (incidental) | IO: PyArrow, Compute: PyArrow (DuckDB not auto-preferred over PyArrow) |
+| CI environment | `compute-backend: pyarrow` | everything | IO: PyArrow, Compute: PyArrow (explicit — deterministic) |
+
+**Key behavior:** Auto-detection only promotes DataFusion (because it's installed via
+PyIceberg's own optional extra `pip install 'pyiceberg[datafusion]'`). DuckDB is NOT
+auto-promoted because users commonly have it installed for unrelated reasons. DuckDB
+requires explicit configuration to be used by PyIceberg.
+
+#### 7.5.6 Documentation: Backend Capabilities Quick Reference
+
+This goes in user-facing docs so power users can make informed choices:
+
+| Backend | Strengths | Limitations | Install | Best for |
+|---------|-----------|-------------|---------|----------|
+| **pyarrow** | Always available, zero config | No spill (OOMs on large data), no join | Included | Small tables, simple operations |
+| **datafusion** | Bounded memory (sort/join/filter), Apache 2.0, Arrow-native | Extra install needed | `pip install 'pyiceberg[datafusion]'` | Production: compaction, eq deletes, large tables |
+| **duckdb** | Bounded memory, fast for mixed workloads | BSL license (S3 ext), connection-wide memory | `pip install duckdb` | Users already in DuckDB ecosystem |
+| **polars** *(future)* | Fast eager operations, nice API | No spill, no join spill | `pip install polars` | IO only (read Parquet fast) |
+| **cudf** *(future)* | GPU-accelerated compute | Requires NVIDIA GPU, VRAM limits | CUDA setup | GPU environments, large aggregations |
 
 ### 7.6 Why This Approach Is Correct
 
