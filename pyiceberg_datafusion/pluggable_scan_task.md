@@ -87,6 +87,107 @@ This is a **complete execution instruction**: "read file X, apply deletes Y, fil
 by predicate Z." Any backend receiving this has everything it needs to produce the
 correct output.
 
+### 1.5 Server-Side Scan Planning: How It Fits
+
+PyIceberg already supports **pluggable scan planning** — not just pluggable execution.
+The scan planning step itself can be performed by different planners:
+
+```python
+# In DataScan.plan_files():
+def plan_files(self) -> Iterable[FileScanTask]:
+    if self._should_use_server_side_planning():
+        return self._plan_files_server_side()   # REST catalog does the planning
+    return self._plan_files_local()             # PyIceberg does it locally
+```
+
+This is tracked in [#2303 (Pluggable Scan Planning)](https://github.com/apache/iceberg-python/issues/2303)
+and [#2775 (Server-Side Scan Planning)](https://github.com/apache/iceberg-python/issues/2775).
+
+**Three scan planners exist or are planned:**
+
+| Planner | Where it runs | Status | Output |
+|---------|--------------|--------|--------|
+| **Python local** | PyIceberg client (reads manifests) | ✅ Working | `Iterable[FileScanTask]` |
+| **REST server-side** | REST catalog server | ✅ Partially merged | `Iterable[FileScanTask]` |
+| **iceberg-rust** | Rust (via `pyiceberg-core`) | Proposed (#2303) | `Iterable[FileScanTask]` |
+
+**Critical observation: ALL planners produce the same output type (`FileScanTask`).**
+
+This means the pluggable execution backend is **completely decoupled from the choice of
+scan planner.** Whether scan planning happens in Python, on the REST server, or in Rust —
+the output is always `Iterable[FileScanTask]`, and the execution backend consumes that
+identically.
+
+```mermaid
+graph TD
+    subgraph "Pluggable Scan Planning (upstream of us)"
+        SP_PY["Python local planner<br/>(reads manifests directly)"]
+        SP_REST["REST server-side planner<br/>(server does manifest scanning)"]
+        SP_RUST["iceberg-rust planner<br/>(Rust does manifest scanning)"]
+    end
+
+    subgraph "THE HANDOFF POINT"
+        FST["Iterable[FileScanTask]<br/>(same type regardless of who planned)"]
+    end
+
+    subgraph "Pluggable Execution Backend (our work)"
+        EB_PA["PyArrowBackend<br/>(read + compute in PyArrow)"]
+        EB_DF["DataFusionBackend<br/>(read/compute with spill)"]
+        EB_DDB["DuckDBBackend<br/>(read/compute via DuckDB)"]
+    end
+
+    SP_PY --> FST
+    SP_REST --> FST
+    SP_RUST --> FST
+    FST --> EB_PA
+    FST --> EB_DF
+    FST --> EB_DDB
+```
+
+### 1.6 Why This Is a Smooth Interaction (Not a Complex Mess)
+
+The two pluggable axes (scan planning and execution) interact cleanly because of
+**the FileScanTask contract**:
+
+1. **Planners promise:** "I'll give you correct `FileScanTask`s — right files, right
+   deletes, right residual filter. How I determined them is my business."
+
+2. **Backends promise:** "Give me `FileScanTask`s and I'll read the data, apply deletes,
+   and return correct Arrow output. How you planned them is your business."
+
+Neither side needs to know about the other. They communicate exclusively through
+`FileScanTask` — a data structure defined by PyIceberg's `table/__init__.py`.
+
+**No conflict with server-side planning:**
+- Server-side planning makes the *planning* faster (server reads manifests, not client)
+- Our pluggable backend makes the *execution* more capable (bounded memory, spill)
+- They address different performance bottlenecks:
+  - Planning bottleneck = manifest scanning latency (solved by server-side)
+  - Execution bottleneck = OOM on data compute (solved by pluggable backend)
+
+**They compose freely:**
+```
+Server-side planning + DataFusion execution  → fast planning + bounded compute
+Python local planning + DataFusion execution → simple + bounded compute
+REST planning + PyArrow execution            → fast planning + in-memory compute
+```
+
+Any combination works because `FileScanTask` is the stable contract between them.
+
+### 1.7 The Metadata OOM Problem Revisited
+
+One subtlety: **local scan planning** itself reads manifests into memory. For the
+normal scan path (partition-pruned), this is bounded. But for operations like orphan
+file deletion that enumerate ALL manifests across ALL snapshots, the planning phase
+can OOM before execution even begins.
+
+Server-side planning helps here — the server handles the manifest scanning, and the
+client only receives the resulting `FileScanTask` list (which is much smaller than
+the full manifest content).
+
+For local planning with large metadata, our streaming pattern (Section 4 of this doc)
+applies: iterate manifests as a generator, never materialize the full set.
+
 ---
 
 ## 2. The Pluggable Boundary: Formal Definition
