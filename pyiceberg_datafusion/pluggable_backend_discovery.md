@@ -663,3 +663,284 @@ maps naturally to all 5 studied engines with no special-casing.
 3. **Write delegation:** DataFusion backend delegates writes to PyArrow (acceptable — write is I/O-bound)
 4. **Streaming DuckDB results:** DuckDB materializes; need to chunk into iterator
 5. **Equality deletes:** Not yet supported — the protocol enables it (via `anti_join`), implementation is a separate PR
+
+---
+
+## 9. Expression Conversion: The Visitor Pattern
+
+### 9.1 How It Works Today (PyArrow)
+
+PyIceberg's `BooleanExpression` is a strongly-typed AST. Users don't write SQL — they
+write Iceberg expressions:
+
+```python
+# User writes:
+table.scan(row_filter="age > 18 AND country = 'US'")
+# Or programmatically:
+table.scan(row_filter=And(GreaterThan("age", 18), EqualTo("country", "US")))
+```
+
+PyIceberg parses this into a `BooleanExpression` tree. During scan planning, this tree
+is used for partition pruning. The remainder (residual) is passed to the execution backend.
+
+The existing `expression_to_pyarrow()` (200 lines in `pyarrow.py`) uses PyIceberg's
+`BoundBooleanExpressionVisitor` to walk the AST and produce `pc.Expression` objects:
+
+```python
+# Existing: pyiceberg/io/pyarrow.py (simplified)
+class _ConvertToArrowExpression(BoundBooleanExpressionVisitor[pc.Expression]):
+    def visit_equal(self, term, literal) -> pc.Expression:
+        return pc.field(term.ref().name) == pc.scalar(literal.value)
+    def visit_greater_than(self, term, literal) -> pc.Expression:
+        return pc.field(term.ref().name) > pc.scalar(literal.value)
+    def visit_and(self, left, right) -> pc.Expression:
+        return left & right
+    # ... ~15 more visit methods
+```
+
+### 9.2 What We Need for SQL-Based Backends
+
+For DataFusion and DuckDB, the same visitor produces SQL strings instead:
+
+```python
+# New: pyiceberg/execution/expression_converters.py (conceptual)
+class _ConvertToSql(BoundBooleanExpressionVisitor[str]):
+    def visit_equal(self, term, literal) -> str:
+        return f"{self._quote(term.ref().name)} = {self._literal(literal)}"
+    def visit_greater_than(self, term, literal) -> str:
+        return f"{self._quote(term.ref().name)} > {self._literal(literal)}"
+    def visit_and(self, left, right) -> str:
+        return f"({left} AND {right})"
+    def visit_in(self, term, literals) -> str:
+        values = ", ".join(self._literal(lit) for lit in literals)
+        return f"{self._quote(term.ref().name)} IN ({values})"
+    def visit_starts_with(self, term, literal) -> str:
+        return f"{self._quote(term.ref().name)} LIKE '{literal.value}%'"
+    # ... ~15 more visit methods
+
+def expression_to_sql(expr: BooleanExpression, schema: Schema) -> str:
+    """Convert Iceberg BooleanExpression to SQL WHERE clause."""
+    bound = bind(schema, expr)
+    return visit(bound, _ConvertToSql())
+```
+
+This is ~50-80 lines per backend. DataFusion and DuckDB share the same SQL converter
+since both use standard SQL. Polars would need its own (`expression_to_polars()`
+returning `pl.Expr` objects).
+
+### 9.3 The Complete Predicate Type Set
+
+Iceberg defines exactly these predicate types (from the spec):
+
+| Predicate | PyArrow (`pc.*`) | SQL (DataFusion/DuckDB) | Polars (`pl.*`) |
+|-----------|-----------------|-------------------------|-----------------|
+| `AlwaysTrue` | `pc.scalar(True)` | `1=1` | `pl.lit(True)` |
+| `AlwaysFalse` | `pc.scalar(False)` | `1=0` | `pl.lit(False)` |
+| `Not(x)` | `~x` | `NOT (x)` | `~x` |
+| `And(l, r)` | `l & r` | `(l AND r)` | `l & r` |
+| `Or(l, r)` | `l \| r` | `(l OR r)` | `l \| r` |
+| `IsNull(col)` | `pc.field(col).is_null()` | `col IS NULL` | `pl.col(col).is_null()` |
+| `NotNull(col)` | `pc.field(col).is_valid()` | `col IS NOT NULL` | `pl.col(col).is_not_null()` |
+| `IsNaN(col)` | `pc.field(col).is_nan()` | `isnan(col)` | `pl.col(col).is_nan()` |
+| `Equal(col, val)` | `pc.field(col) == pc.scalar(val)` | `col = val` | `pl.col(col) == val` |
+| `NotEqual(col, val)` | `pc.field(col) != pc.scalar(val)` | `col != val` | `pl.col(col) != val` |
+| `GreaterThan(col, val)` | `pc.field(col) > pc.scalar(val)` | `col > val` | `pl.col(col) > val` |
+| `GreaterThanOrEqual` | `pc.field(col) >= pc.scalar(val)` | `col >= val` | `pl.col(col) >= val` |
+| `LessThan(col, val)` | `pc.field(col) < pc.scalar(val)` | `col < val` | `pl.col(col) < val` |
+| `LessThanOrEqual` | `pc.field(col) <= pc.scalar(val)` | `col <= val` | `pl.col(col) <= val` |
+| `In(col, vals)` | `pc.field(col).isin(vals)` | `col IN (v1, v2, ...)` | `pl.col(col).is_in(vals)` |
+| `NotIn(col, vals)` | `~pc.field(col).isin(vals)` | `col NOT IN (v1, v2, ...)` | `~pl.col(col).is_in(vals)` |
+| `StartsWith(col, prefix)` | `pc.starts_with(col, prefix)` | `col LIKE 'prefix%'` | `pl.col(col).str.starts_with(prefix)` |
+| `NotStartsWith` | `~pc.starts_with(col, prefix)` | `col NOT LIKE 'prefix%'` | `~pl.col(col).str.starts_with(prefix)` |
+
+**Every predicate has a natural translation in all three target formats (PyArrow,
+SQL, Polars).** No predicate is impossible to express in any backend.
+
+### 9.4 The Fallback Strategy
+
+If a backend's expression converter encounters an unsupported predicate type:
+
+```python
+class _ConvertToSql(BoundBooleanExpressionVisitor[str]):
+    def visit_unknown(self, expr) -> str:
+        # Can't translate → return TRUE (accept all rows)
+        # PyIceberg will post-filter the results
+        return "1=1"
+```
+
+This is safe because:
+1. The backend returns MORE rows than needed (superset)
+2. PyIceberg applies the full filter as a post-filter on the Arrow output
+3. Result is always correct — just slightly less efficient (more rows read)
+
+---
+
+## 10. Edge Cases and Validation Requirements
+
+### 10.1 Column Identity and Schema Evolution
+
+**The concern:** Iceberg matches columns by field ID, not by name. A renamed column
+(`old_name` → `new_name`) has the same field ID in both schemas. The physical Parquet
+file still has `old_name` as the column header.
+
+**How it's handled today:** `_task_to_record_batches()` in `pyarrow.py`:
+1. Reads the physical file schema
+2. Maps physical column names → Iceberg field IDs (via metadata or name mapping)
+3. Projects/reorders to match the requested schema
+4. Fills missing columns with nulls
+5. Casts types if needed (int32 → int64 promotion)
+
+**In the pluggable model:** This logic stays in PyIceberg (shared code), ABOVE the
+backend. The backend reads the raw physical file. PyIceberg's `_to_requested_schema()`
+transforms the output to match the projected Iceberg schema.
+
+**Backend's responsibility:** Just read the file honestly (physical columns, physical types).
+**PyIceberg's responsibility:** Map the result to the requested schema using field IDs.
+
+### 10.2 Partial Pushdown (Residual Expressions)
+
+**The concern:** What if the backend can't evaluate part of the filter?
+
+**How it's handled today:** `ManifestGroupPlanner` computes a `ResidualEvaluator`.
+The `FileScanTask.residual` contains ONLY the filter that partition pruning couldn't
+resolve. This residual is what gets passed to the backend.
+
+**In the pluggable model:** The backend receives the residual expression. If it can
+evaluate the full residual → it pushes it down (fewer rows returned). If it can only
+evaluate part → it pushes what it can and returns a superset. PyIceberg applies the
+full residual as a post-filter on the output.
+
+**Validation test:**
+```python
+def test_partial_pushdown_correctness(backend, data_with_complex_filter):
+    """Backend that can't push down StartsWith still returns correct results."""
+    # Filter includes StartsWith (which some backends might not push down)
+    result_with_pushdown = backend.read_parquet(path, schema, complex_filter, ...)
+    result_full_scan = backend.read_parquet(path, schema, ALWAYS_TRUE, ...)
+    post_filtered = apply_filter(result_full_scan, complex_filter)
+    assert_arrow_equal(result_with_pushdown, post_filtered)
+```
+
+### 10.3 Expression Function Mismatch
+
+**The concern:** `StartsWith("col", "prefix")` maps to different syntax per engine.
+
+**How it's handled:** The expression converter table in §9.3 shows every predicate
+has a natural translation. The set is finite (Iceberg spec defines exactly these 17
+predicate types). Each converter handles all 17.
+
+**Validation test:**
+```python
+@pytest.mark.parametrize("predicate", ALL_ICEBERG_PREDICATE_TYPES)
+def test_expression_converter_handles_all_types(backend, predicate):
+    """Every Iceberg predicate type converts without error for every backend."""
+    sql_or_expr = backend.convert_expression(predicate)
+    assert sql_or_expr is not None
+```
+
+### 10.4 Positional Delete Application
+
+**The concern:** Files with positional deletes require reading a companion delete file
+and excluding specific row indices.
+
+**How it's handled today:** `_read_all_delete_files()` reads ALL delete files upfront
+into `dict[file_path → list[ChunkedArray of positions]]`. Then per-batch, rows at
+those positions are excluded via `batch.take(keep_indices)`.
+
+**In the pluggable model:** `FileScanTask.delete_files` tells the backend which delete
+files apply. The `ExecutionBackend.execute_scan()` contract says: "read the data file,
+apply the delete files, return only surviving rows." The backend decides HOW to apply
+them (PyArrow: `take(indices)`, DataFusion: anti-join on position, DuckDB: filter).
+
+**Validation test:**
+```python
+def test_positional_deletes_applied_correctly(backend, data_file_with_deletes):
+    """Backend produces correct output with positional deletes applied."""
+    task = FileScanTask(data_file, delete_files={pos_delete_file})
+    result = backend.execute_scan([task], ...)
+    # Verify deleted row indices are NOT in result
+    assert row_at_position_5_not_in(result)
+```
+
+### 10.5 NULL Handling in Expressions
+
+**The concern:** SQL's three-valued logic (TRUE/FALSE/NULL) differs from Python's
+boolean logic. `col = 5` in SQL excludes NULLs; in Python `None == 5` is `False`.
+
+**How it's handled:** Iceberg's spec explicitly defines NULL semantics for each
+predicate. `IsNull(col)` and `NotNull(col)` are separate predicates. Comparisons
+(`Equal`, `GreaterThan`) follow SQL semantics (NULL comparisons yield NULL, not FALSE).
+
+**Validation test:**
+```python
+def test_null_handling_in_filter(backend, data_with_nulls):
+    """Backend correctly handles NULLs per SQL/Iceberg semantics."""
+    # Filter: col > 5 should NOT include rows where col is NULL
+    result = backend.read_parquet(path, schema, GreaterThan("col", 5), ...)
+    assert no_nulls_in_column(result, "col")
+```
+
+### 10.6 Nested Types in Expressions
+
+**The concern:** Iceberg supports struct, list, and map types. Expressions can
+reference nested fields (`struct_col.field_name`).
+
+**Current status:** PyIceberg's expression system supports referencing nested fields
+via dotted names. The `BoundReference` resolves the field path to a specific field ID.
+
+**In the pluggable model:** The expression converter must handle dotted paths:
+- SQL: `struct_col.field_name > 5` (most SQL engines support this)
+- PyArrow: `pc.field("struct_col", "field_name") > pc.scalar(5)`
+- Polars: `pl.col("struct_col").struct.field("field_name") > 5`
+
+**Validation test:**
+```python
+def test_nested_field_filter(backend, data_with_structs):
+    """Backend correctly filters on nested struct fields."""
+    result = backend.read_parquet(path, schema, GreaterThan("address.zip", 90000), ...)
+    assert all(row["address"]["zip"] > 90000 for row in result.to_pydict())
+```
+
+### 10.7 Comprehensive Validation Suite
+
+The first PR must include a parametrized test suite that validates ALL edge cases
+across ALL backends:
+
+```python
+# tests/execution/test_backend_validation.py
+
+BACKENDS = ["pyarrow", "datafusion"]  # PR 1 scope
+
+@pytest.fixture(params=BACKENDS)
+def backend(request): ...
+
+class TestExpressionConversion:
+    """All predicate types convert correctly for all backends."""
+    @pytest.mark.parametrize("pred", ALL_17_PREDICATE_TYPES)
+    def test_predicate_converts(self, backend, pred): ...
+    def test_null_semantics(self, backend): ...
+    def test_nested_field_reference(self, backend): ...
+    def test_unsupported_predicate_falls_back(self, backend): ...
+
+class TestSchemaEvolution:
+    """Column renames, type promotions, and missing columns handled."""
+    def test_renamed_column_read_correctly(self, backend): ...
+    def test_missing_column_filled_with_null(self, backend): ...
+    def test_type_promotion_int32_to_int64(self, backend): ...
+
+class TestDeleteResolution:
+    """Positional (and future equality) deletes applied correctly."""
+    def test_positional_deletes_exclude_rows(self, backend): ...
+    def test_multiple_delete_files_composed(self, backend): ...
+    def test_no_deletes_returns_all_rows(self, backend): ...
+
+class TestBoundedMemory:
+    """Spill-capable backends complete within memory_limit."""
+    def test_sort_large_data_within_budget(self, datafusion_backend): ...
+    def test_anti_join_large_data_within_budget(self, datafusion_backend): ...
+
+class TestStreamingContract:
+    """All backends produce Iterator[RecordBatch], not materialized tables."""
+    def test_output_is_iterator(self, backend): ...
+    def test_streaming_does_not_materialize_all(self, backend): ...
+```
