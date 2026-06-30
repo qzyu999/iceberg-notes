@@ -638,47 +638,134 @@ combination of protocol methods. No operation requires a method not in the proto
 
 ## 7. Implementation Strategy
 
-### 7.1 Phase 1: DataFusion + PyArrow (Two Implementations, Interface Emerges)
+### 7.1 The Fowler Principle Applied Aggressively
 
-The first PR adds DataFusion as a compute backend alongside existing PyArrow:
+> "When you have two or three implementations of something, then you can see what
+> the interface should be. When you have one implementation, you're just guessing."
+
+Rather than building one backend (DataFusion) and hoping the interface is correct,
+we build **three backends in the first PR**: PyArrow, DataFusion, and DuckDB. This
+gives us enough implementations to derive the correct interface from empirical
+observation rather than speculation.
+
+The cost of building all three upfront is low because:
+- PyArrow: already exists — we're just extracting it behind the protocol
+- DataFusion: the primary new implementation (~200 lines of compute functions)
+- DuckDB: structurally similar to DataFusion (SQL-based, Arrow-native, ~150 lines)
+
+### 7.2 The Single PR: Three Backends, One Protocol
 
 ```
 pyiceberg/execution/
-├── engine.py       # resolve which backend to use
-├── session.py      # DataFusion session with FairSpillPool
-├── compute.py      # DataFusion implementations of sort/join/filter
-└── object_store.py # Translate FileIO props → DataFusion object store
+├── __init__.py              # Re-exports
+├── engine.py                # resolve_backend() — auto-detect what's installed
+├── protocol.py              # IOBackend + ComputeBackend Protocol definitions
+├── session.py               # Shared utilities (memory limit parsing, etc.)
+├── backends/
+│   ├── __init__.py
+│   ├── pyarrow_backend.py   # Extract from existing pyarrow.py monolith
+│   ├── datafusion_backend.py # New: DataFusion for IO + compute (spill-capable)
+│   └── duckdb_backend.py    # New: DuckDB for IO + compute (spill-capable)
+└── object_store.py          # Translate FileIO props → backend-specific config
 ```
 
-This gives us two concrete implementations:
-- **PyArrow** (existing, in `pyiceberg/io/pyarrow.py`) — read, write, filter, sort (in-memory)
-- **DataFusion** (new, in `pyiceberg/execution/compute.py`) — sort, join, filter (bounded-memory)
+### 7.3 Why Three (Not Two) Before Extracting the Interface
 
-### 7.2 Phase 2: Extract Protocol (Interface Emerges from Two Implementations)
+With two implementations, the "common interface" might be an accident of similarity
+between two specific libraries. With three, patterns that hold across all three are
+genuinely general:
 
-After Phase 1 is proven, we observe the common interface and extract:
+| Test | Two impls (PyArrow + DataFusion) | Three impls (+ DuckDB) |
+|------|---|---|
+| `sort(data, keys, memory_limit)` | Both accept this signature ✓ | DuckDB also accepts ✓ → **the signature is correct** |
+| `anti_join(left, right, cols, memory_limit)` | Both accept ✓ | DuckDB also accepts ✓ → **correct** |
+| Expression format | PyArrow: `pc.Expression`, DF: SQL string | DuckDB: also SQL → **SQL string is the right abstraction for the interface** |
+| Object store config | PyArrow: `pyarrow.fs`, DF: `RuntimeEnvBuilder` | DuckDB: `SET s3_region` → **each backend needs its own, not shared** |
+
+The third implementation validates (or refutes) interface decisions made based on
+the first two. It catches over-fitting to PyArrow+DataFusion specifics.
+
+### 7.4 Concrete Implementation Plan
+
+**PR 1: Foundation + Three Backends (the interface-defining PR)**
+
+| Component | Work | Lines (est.) |
+|-----------|------|:---:|
+| `protocol.py` | Define `IOBackend` + `ComputeBackend` + `ExecutionBackend` protocols | ~80 |
+| `engine.py` | Auto-detect installed backends, resolve preferred | ~60 |
+| `pyarrow_backend.py` | Extract `ArrowScan` read logic + `write_file` + sort/filter into protocol | ~300 (moved, not new) |
+| `datafusion_backend.py` | `SessionContext` + `register_parquet` + SQL for sort/join/filter | ~200 |
+| `duckdb_backend.py` | `duckdb.connect()` + `read_parquet` + SQL for sort/join/filter | ~150 |
+| `object_store.py` | FileIO props → backend-specific object store config | ~100 |
+| Tests | Each backend produces identical output for same input | ~300 |
+
+Total new code: ~900 lines. Moved code: ~300 lines (from `pyarrow.py` monolith).
+
+**PR 2: Wire into existing operations**
+
+Hook the backend resolution into `DataScan.to_arrow()`, `Transaction.delete()`,
+`Transaction.upsert()`. Existing behavior unchanged when `engine.py` resolves to
+PyArrow (which it does by default if nothing else is installed).
+
+**PR 3+: New operations using the backend**
+
+`table.compact()`, `table.delete_orphan_files()`, etc. — these use the protocol
+from day one and benefit from whichever backend is available.
+
+### 7.5 The Backend Resolution Logic
 
 ```python
-# The protocol is whatever PyArrow and DataFusion have in common:
-# Both accept Iterator[RecordBatch], both return Iterator[RecordBatch]
-# The memory_limit parameter is optional (PyArrow ignores it)
+# pyiceberg/execution/engine.py
+
+def resolve_backend(operation: str) -> tuple[IOBackend, ComputeBackend]:
+    """Resolve the best available backends for the given operation.
+
+    Priority (highest first):
+      1. DataFusion (if installed) — bounded memory, Apache 2.0
+      2. DuckDB (if installed) — bounded memory, BSL caveat for S3
+      3. PyArrow (always available) — fallback, in-memory only
+    """
+    try:
+        from pyiceberg.execution.backends.datafusion_backend import (
+            DataFusionIOBackend, DataFusionComputeBackend
+        )
+        return DataFusionIOBackend(), DataFusionComputeBackend()
+    except ImportError:
+        pass
+
+    try:
+        from pyiceberg.execution.backends.duckdb_backend import (
+            DuckDBIOBackend, DuckDBComputeBackend
+        )
+        return DuckDBIOBackend(), DuckDBComputeBackend()
+    except ImportError:
+        pass
+
+    from pyiceberg.execution.backends.pyarrow_backend import (
+        PyArrowIOBackend, PyArrowComputeBackend
+    )
+    warnings.warn(
+        f"'{operation}' using PyArrow (in-memory only, may OOM on large data). "
+        f"Install 'pyiceberg[datafusion]' or 'pyiceberg[duckdb]' for bounded-memory execution.",
+        UserWarning, stacklevel=3,
+    )
+    return PyArrowIOBackend(), PyArrowComputeBackend()
 ```
 
-### 7.3 Phase 3: Additional Backends (Community-Driven)
+### 7.6 Why This Approach Is Sound
 
-With the protocol documented, others contribute:
-- DuckDB backend (read + compute)
-- Polars backend (read only — no spill)
-- cuDF backend (compute for GPU environments)
-- Ray backend (distributed reads across workers)
+**Fowler's principle (satisfied):** Three implementations → the shared interface is
+derived from observation, not guessed from one.
 
-### 7.4 Why This Order Follows CS Best Practice
+**Open-Closed principle (satisfied):** Adding a fourth backend (Polars, cuDF, Ray)
+requires only implementing the protocol — no changes to existing code.
 
-> "When you have two or three implementations, you can see what the interface should be.
-> With one, you're just guessing." — Fowler
+**Dependency Inversion (satisfied):** PyIceberg's table operations depend on the
+abstract `Protocol`, not on concrete backend classes.
 
-Phase 1 gives us the second implementation. Phase 2 extracts the shared interface.
-Phase 3 proves the interface is correct by showing third-party backends can implement it.
+**YAGNI (satisfied):** We're not building speculative infrastructure. DuckDB is a
+concrete, working library we can test today. It validates the interface while also
+being useful to DuckDB users.
 
 ---
 
@@ -686,41 +773,84 @@ Phase 3 proves the interface is correct by showing third-party backends can impl
 
 ### 8.1 Requirements for Correctness
 
-The first PR (DataFusion compute backend) must demonstrate:
+The first PR (three backends + protocol) must demonstrate:
 
-1. **Functional equivalence:** For identical input, DataFusion and PyArrow produce
-   identical output (same rows, same order for ordered ops, same values).
+1. **Functional equivalence:** For identical input, ALL THREE backends produce
+   identical output (same rows, same values, same order for ordered ops).
 
-2. **Bounded memory:** DataFusion path completes within configured memory_limit
-   for inputs that OOM the PyArrow path.
+2. **Bounded memory (DataFusion + DuckDB):** Both spill-capable backends complete
+   within configured `memory_limit` for inputs that OOM the PyArrow backend.
 
-3. **Interface stability:** The function signatures (`sort(batches, keys, limit) →
-   batches`) are general enough that a DuckDB implementation would have the same
-   signature. Evidence: we can sketch the DuckDB version in comments.
+3. **Protocol generality:** The protocol definitions naturally fit all three
+   implementations without any backend needing special-case accommodations.
+   This proves the interface is correct.
 
-4. **Streaming contract:** All interfaces use `Iterator[RecordBatch]` (not `pa.Table`),
-   ensuring bounded memory through the entire pipeline.
+4. **Streaming contract:** All interfaces use `Iterator[pa.RecordBatch]` (not
+   `pa.Table`), ensuring bounded memory through the entire pipeline regardless
+   of backend.
 
-5. **No semantic coupling:** The compute functions know nothing about Iceberg. They
-   receive Arrow data and return Arrow data. Iceberg logic remains in the caller.
+5. **No semantic coupling:** The backend functions know nothing about Iceberg.
+   They receive Arrow data, perform compute, return Arrow data.
 
-### 8.2 Evidence for Interface Correctness
+6. **Capability declaration:** PyArrow backend declares
+   `supports_bounded_memory = False`. DataFusion and DuckDB declare `True`.
+   Operations that require bounded memory only dispatch to capable backends.
 
-For each protocol method, we provide:
-- The DataFusion implementation (Phase 1 PR)
-- A sketch of what the DuckDB implementation would look like (comments/docs)
-- A sketch of what the Polars implementation would look like (comments/docs)
+### 8.2 Evidence for Interface Correctness (Three Implementations)
 
-If all three can be expressed with the same signature, the interface is correct.
+For each protocol method, the PR provides three working implementations:
+
+| Protocol method | PyArrow impl | DataFusion impl | DuckDB impl |
+|----------------|---|---|---|
+| `read_parquet(path, schema, filter)` | `pq.ParquetFile` + `Scanner` | `ctx.register_parquet()` + SQL | `duckdb.read_parquet()` |
+| `write_parquet(batches, path)` | `pq.ParquetWriter` | Delegates to PyArrow | `duckdb.write_parquet()` or delegate |
+| `sort(data, keys, limit)` | `pa.Table.sort_by()` | `ctx.sql("ORDER BY")` | `con.sql("ORDER BY")` |
+| `anti_join(left, right, cols, limit)` | `pc.is_in()` (limited) | `ctx.sql("LEFT ANTI JOIN")` | `con.sql("LEFT ANTI JOIN")` |
+| `filter(data, predicate)` | `table.filter(pc.Expression)` | `ctx.sql("WHERE ...")` | `con.sql("WHERE ...")` |
+
+If the same protocol signature works for all three with no special-casing → the
+protocol is correct by construction.
 
 ### 8.3 Documentation for Future Backend Contributors
 
-The PR includes a `BACKENDS.md` documenting:
-- The protocol methods and their contracts
-- Input/output types (always `Iterator[pa.RecordBatch]`)
-- The `memory_limit` semantics (best-effort for backends without spill)
-- The `supports_bounded_memory` capability declaration
-- Example: how to implement a new backend
+The PR includes `pyiceberg/execution/BACKENDS.md` documenting:
+- Protocol definitions with full type signatures
+- Contract for each method (what inputs mean, what output guarantees)
+- `memory_limit` semantics (MUST honor if `supports_bounded_memory`, best-effort otherwise)
+- How to register a new backend
+- Testing requirements (must pass the equivalence test suite)
+- Example: skeleton for a new backend implementation
+
+### 8.4 The Test Suite
+
+```python
+# tests/execution/test_backend_equivalence.py
+
+@pytest.fixture(params=["pyarrow", "datafusion", "duckdb"])
+def backend(request):
+    """Parametrize all tests across all available backends."""
+    ...
+
+def test_sort_produces_same_output(backend, sample_data):
+    """All backends sort identically."""
+    result = backend.compute.sort(sample_data, keys=["id"], memory_limit=None)
+    expected = sorted_reference(sample_data, keys=["id"])
+    assert_arrow_equal(result, expected)
+
+def test_anti_join_produces_same_output(backend, left_data, right_data):
+    """All backends anti-join identically."""
+    result = backend.compute.anti_join(left_data, right_data, on=["id"])
+    expected = anti_join_reference(left_data, right_data, on=["id"])
+    assert_arrow_equal(result, expected)
+
+def test_bounded_memory_sort(spill_capable_backend, large_data):
+    """Spill-capable backends complete within memory_limit."""
+    # large_data > memory_limit → must spill
+    result = spill_capable_backend.compute.sort(
+        large_data, keys=["ts"], memory_limit=64_000_000  # 64MB
+    )
+    assert result is not None  # completed without OOM
+```
 
 ---
 
