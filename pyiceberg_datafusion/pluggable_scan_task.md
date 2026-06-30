@@ -402,26 +402,84 @@ Scan planning itself can OOM for operations that enumerate large metadata sets:
 | Compaction file selection | Files in target partitions | O(files_in_partition) | Low |
 | Full table stats | All data files | O(total_files) | Medium |
 
-### 4.2 The Streaming Solution
+### 4.2 What Java Iceberg Does (And Why We Can Do Better)
 
-For high-OOM-risk operations, scan planning must stream metadata rather than
-materialize lists:
+Java Iceberg does NOT solve this problem. The Spark driver node holds all manifest
+entries and file metadata in memory. For extremely large tables, users hit Spark
+driver OOM with errors like:
+
+```
+java.lang.OutOfMemoryError: Java heap space
+  at org.apache.iceberg.BaseTableScan.planFiles(...)
+```
+
+The standard fix in the Java ecosystem is operational: "bump `spark.driver.memory`
+to 16GB." This is documented as a known limitation — the planning/coordination node
+must be large enough to hold the full metadata set.
+
+**We can do better.** Python's generator model makes streaming metadata natural and
+nearly free. There is no reason to accept the same limitation Java has.
+
+### 4.3 The Streaming Approach: Always, Not Conditionally
+
+**Principle:** Apply the streaming pattern to ALL new operations unconditionally.
+The overhead for small metadata (100 files) is negligible (microseconds to yield 100
+items). The benefit for large metadata (10M files) is the difference between working
+and OOM. Since we cannot predict metadata scale, we design for the limit.
+
+This is the same principle from Section 5.2 of `datafusion_direction.md`: never branch
+on assumed data size.
 
 ```python
-# Instead of:
-all_paths = [entry.file_path for snapshot in snapshots for manifest in ...]  # OOMs
-
-# Use generator → temp file → register with compute backend:
-def _iter_valid_paths(table):
+# THE PATTERN (used by ALL new operations):
+def _iter_metadata(table, operation_filter) -> Iterator[MetadataEntry]:
+    """Generator — O(1) memory per yield, regardless of total entries."""
     for snapshot in table.snapshots():
         for manifest in snapshot.manifests(table.io):
             for entry in manifest.fetch_manifest_entry(table.io):
-                yield entry.data_file.file_path  # O(1) memory per yield
+                if operation_filter(entry):
+                    yield entry  # O(1) memory — never accumulates
+
+# Consuming the generator (two options):
+
+# Option A: Direct streaming into compute backend
+batches = _batch_iterator(_iter_metadata(table, filter), batch_size=8192)
+ctx.register_record_batches("metadata", batches)
+
+# Option B: Stream to temp Parquet (for operations needing random access)
+tmp_path = _stream_to_parquet(_iter_metadata(table, filter), schema)
+ctx.register_parquet("metadata", tmp_path)
 ```
 
-The streaming metadata is written to a temp Parquet file and registered with the
-compute backend for the anti-join. PyIceberg's semantic layer stays at O(batch_size)
-memory regardless of metadata scale.
+### 4.4 Rollout Strategy
+
+| Scope | Approach | Risk |
+|-------|----------|------|
+| **ALL new operations** (orphan deletion, expire snapshots, compaction, etc.) | Streaming from day one | Zero — no existing behavior to break |
+| **Existing scan planning** (`_plan_files_local`, `DataScan.plan_files()`) | Migrate incrementally as follow-up PRs | Low — partition pruning already bounds most scans |
+
+For existing scan planning, the migration is straightforward: replace list accumulation
+with generator yields. The `ManifestPlanner` already iterates manifests — it just
+currently materializes results into a list. Converting to a generator is a small,
+reviewable change per-subsystem.
+
+### 4.5 Formal Memory Guarantee
+
+**Theorem (Streaming Metadata Bound):** With the generator pattern applied universally:
+
+```
+M_planning(Op) = O(batch_size × entry_size)  for ALL operations
+               ≈ O(8192 × 500B) = 4MB       regardless of table scale
+```
+
+Compare to Java Iceberg:
+```
+M_planning_java(Op) = O(total_files × entry_size)  [unbounded, OOMs at scale]
+```
+
+PyIceberg achieves asymptotically better memory behavior for scan planning than
+Java Iceberg — by choosing streaming over materialization. This is a genuine
+architectural advantage of the Python implementation.
 
 ---
 
