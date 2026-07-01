@@ -268,39 +268,53 @@ class ResolvedBackends:
 
 ### What Must Change for the Real PR
 
-| Issue | Severity | Fix |
-|-------|----------|-----|
-| Streaming materialization (#5) | **Critical** | Redesign: pass file paths to backends for read ops, use `register_parquet()` |
-| Expression handling (#6) | **Critical** | Rewrite using `BoundBooleanExpressionVisitor[str]` |
-| FileIO integration (#8) | **Critical** | Accept `FileIO` or use `io_properties` to create filesystem |
-| Write return type (#7) | Moderate | Define `WriteResult` dataclass |
-| Composite key collision (#9) | Moderate | Use null-byte separator or struct comparison |
-| Test location (#12) | Minor | Move to `tests/execution/` |
-| Named return type (#15) | Minor | Use dataclass instead of tuple |
+| Issue | Severity | Fix | Status |
+|-------|----------|-----|:---:|
+| Streaming materialization (#5) | **Critical** | Added docstring warnings. Real PR uses `register_parquet()` | ⚠️ Documented, not architecturally solved |
+| Expression handling (#6) | **Critical** | Now handles BOTH bound + unbound types. Real PR uses visitor pattern | ✅ Fixed for discovery |
+| FileIO integration (#8) | **Critical** | Added TODO comments. Real PR integrates with FileIO | ⚠️ Documented |
+| Write return type (#7) | Moderate | Added `WriteResult` frozen dataclass to `protocol.py` | ✅ Fixed |
+| Composite key collision (#9) | Moderate | Changed separator from `"||"` to `"\x00"` (null byte) | ✅ Fixed |
+| Test location (#12) | Minor | Moved to `tests/execution/test_backend_equivalence.py` | ✅ Fixed |
+| Named return type (#15) | Minor | Added `ResolvedBackends` dataclass | ✅ Fixed |
 
-### The Key Discovery
+### Post-Fix Test Results
 
-**The most important finding:** The protocol's compute methods (`sort`, `anti_join`)
-should NOT accept `Iterator[RecordBatch]` as input for the PRIMARY use case. They
-should accept **file paths** so the backend controls the entire pipeline from disk.
+```
+============================================================
+Backend Equivalence Test (Sort + Anti-Join)
+============================================================
 
-The `Iterator[RecordBatch]` signature only makes sense for the SECONDARY use case:
-user-provided in-memory data (e.g., upsert source dataframe).
+--- Sort by 'id' ascending ---
+  PyArrow     : [1, 1, 2, 3, 4, 5, 6, 9]
+  DataFusion  : [1, 1, 2, 3, 4, 5, 6, 9]
+  DuckDB      : [1, 1, 2, 3, 4, 5, 6, 9]
+  ✓ All backends produce identical sort output
 
-This suggests the protocol needs TWO variants per operation:
-```python
-# Variant A: Backend reads from files (truly streaming, bounded memory)
-def sort_files(self, file_paths: list[str], ...) -> Iterator[pa.RecordBatch]: ...
+--- Anti-join: left \ right on 'id' ---
+  PyArrow     : ids remaining = [1, 3, 5]
+  DataFusion  : ids remaining = [1, 3, 5]
+  DuckDB      : ids remaining = [1, 3, 5]
+  ✓ All backends produce identical anti-join output
 
-# Variant B: Backend computes on pre-materialized data (in-memory path)
-def sort_batches(self, data: Iterator[pa.RecordBatch], ...) -> Iterator[pa.RecordBatch]: ...
+✓ ALL THREE BACKENDS IMPLEMENT THE SAME PROTOCOL
+  AND PRODUCE IDENTICAL OUTPUT FOR SORT AND ANTI-JOIN.
+  Interface is validated per Fowler's principle (3 impls).
+============================================================
 ```
 
-Or alternatively, a union input type:
-```python
-def sort(self, source: list[str] | Iterator[pa.RecordBatch], ...) -> Iterator[pa.RecordBatch]: ...
-```
+All three backends pass after fixes. The protocol is validated.
 
-This is the kind of insight Fowler's principle was designed to surface — by building
-three implementations, we discovered that the clean-looking protocol has a fundamental
-impedance mismatch with how engines actually work.
+### The Key Discovery (Unchanged — This Is the Most Important Finding)
+
+**The streaming protocol is partially aspirational.** All three backends
+immediately `list(data)` because `register_record_batches()` and `con.register()`
+require materialized data. True streaming requires the backend to control the
+file-read pipeline via `register_parquet()` / `read_parquet()` — which is why the
+`ExecutionBackend.execute_scan(tasks: Iterable[FileScanTask])` pattern (backend
+receives FILE PATHS, not pre-read batches) is the correct primary interface.
+
+The `ComputeBackend.sort(data: Iterator[RecordBatch])` is a SECONDARY interface
+for user-provided in-memory data (e.g., upsert source DataFrame). The PRIMARY
+pipeline should go through `ExecutionBackend.execute_scan()` where the backend
+reads files directly.
