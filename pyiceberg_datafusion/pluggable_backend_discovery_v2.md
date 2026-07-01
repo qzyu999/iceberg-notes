@@ -270,9 +270,9 @@ class ResolvedBackends:
 
 | Issue | Severity | Fix | Status |
 |-------|----------|-----|:---:|
-| Streaming materialization (#5) | **Critical** | Added docstring warnings. Real PR uses `register_parquet()` | ⚠️ Documented, not architecturally solved |
-| Expression handling (#6) | **Critical** | Now handles BOTH bound + unbound types. Real PR uses visitor pattern | ✅ Fixed for discovery |
-| FileIO integration (#8) | **Critical** | Added TODO comments. Real PR integrates with FileIO | ⚠️ Documented |
+| Streaming materialization (#5) | **Critical** | Added `sort_from_files()` + `anti_join_from_files()` that use `register_parquet()` / `read_parquet()` directly. Data never enters Python memory for DataFusion/DuckDB. | ✅ Fixed |
+| Expression handling (#6) | **Critical** | Now handles BOTH bound + unbound types via dual isinstance checks. Real PR uses visitor pattern. | ✅ Fixed |
+| FileIO integration (#8) | **Critical** | Created `object_store.py` with `configure_datafusion_object_store()`, `configure_duckdb_object_store()`, `configure_pyarrow_object_store()`. Translates `io_properties` for S3/GCS/ADLS. | ✅ Fixed |
 | Write return type (#7) | Moderate | Added `WriteResult` frozen dataclass to `protocol.py` | ✅ Fixed |
 | Composite key collision (#9) | Moderate | Changed separator from `"||"` to `"\x00"` (null byte) | ✅ Fixed |
 | Test location (#12) | Minor | Moved to `tests/execution/test_backend_equivalence.py` | ✅ Fixed |
@@ -324,16 +324,25 @@ All seven review issues are now fully resolved:
 - The file-based methods prove true streaming: DataFusion uses `register_parquet()`,
   DuckDB uses `read_parquet([...])` — neither materializes data in Python memory.
 
-### The Key Discovery (Unchanged — This Is the Most Important Finding)
+### The Key Discovery (Updated — Problem SOLVED)
 
-**The streaming protocol is partially aspirational.** All three backends
-immediately `list(data)` because `register_record_batches()` and `con.register()`
-require materialized data. True streaming requires the backend to control the
-file-read pipeline via `register_parquet()` / `read_parquet()` — which is why the
-`ExecutionBackend.execute_scan(tasks: Iterable[FileScanTask])` pattern (backend
-receives FILE PATHS, not pre-read batches) is the correct primary interface.
+**The streaming issue is now architecturally resolved.** The protocol provides TWO
+paths for each compute operation:
 
-The `ComputeBackend.sort(data: Iterator[RecordBatch])` is a SECONDARY interface
-for user-provided in-memory data (e.g., upsert source DataFrame). The PRIMARY
-pipeline should go through `ExecutionBackend.execute_scan()` where the backend
-reads files directly.
+1. **`sort(data: Iterator[RecordBatch], ...)` — in-memory path** (for user-provided
+   data like upsert source DFs). Materializes via `list(data)`. Acceptable for
+   small pre-materialized data.
+
+2. **`sort_from_files(file_paths: list[str], ...)` — file-based path** (for the
+   PRIMARY pipeline). Backend reads directly from disk via `register_parquet()` /
+   `read_parquet()`. Data NEVER enters Python memory. Truly streaming for
+   DataFusion and DuckDB.
+
+The `ExecutionBackend.execute_scan(tasks: Iterable[FileScanTask])` pattern is correct:
+it passes file paths (from tasks) to the backend. The backend controls the full
+pipeline from disk to Arrow output. This is now implemented and tested.
+
+**Object store credentials** are bridged via `pyiceberg/execution/object_store.py`
+which translates PyIceberg's `io_properties` dict to each backend's native config
+format (env vars for DataFusion, `SET` commands for DuckDB, kwargs for PyArrow fs).
+S3, GCS, and ADLS are all supported.
