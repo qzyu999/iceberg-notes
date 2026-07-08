@@ -312,15 +312,15 @@ This is a **behavioral change** that enables equality delete support. It's not j
 
 ### 7.2 Weaknesses / Gaps
 
-| Gap | Risk | Recommendation |
-|-----|------|----------------|
-| No integration test with actual Iceberg table (real catalog, real files) | High — unit mocks may miss schema reconciliation bugs | Add a pytest fixture that creates a real in-memory catalog + table, writes data, applies deletes, and scans |
-| `BoundedMemoryPlanner` has no behavioral test (only protocol compliance + source inspection) | High — the SQL join logic is untested end-to-end | Add a test that creates manifest entries, runs `BoundedMemoryPlanner.plan_files()`, and verifies FileScanTask output |
-| `_SortedRecordBatchReader` cleanup guard is tested only via structural inspection | Medium — the `__del__` fallback is never exercised in tests | Add a test that abandons a reader (let it GC) and verifies temp file cleanup |
-| Expression-to-SQL for bound predicates not tested with real bound expressions | Medium — only AlwaysTrue/AlwaysFalse tested | Add tests with `BoundEqualTo`, `BoundIn`, etc. |
-| Multi-column anti-join warning threshold (`_MULTI_COL_ANTI_JOIN_WARNING_THRESHOLD = 1000`) not tested | Low | Add a test verifying warning emission at threshold |
-| `_apply_sort_order` not tested with actual sort order metadata | Medium | Add a test with a table that has a SortOrder defined |
-| No test for `_read_execution_config_from_file` cache invalidation | Low | Unlikely to regress, but cache tests are good practice |
+| Gap | Risk | Status |
+|-----|------|--------|
+| No integration test with actual Iceberg table (real catalog, real files) | High | ✅ Added `tests/integration/test_pluggable_backend_e2e.py` (requires Docker services — runs in CI) |
+| `BoundedMemoryPlanner` has no behavioral test | High | ✅ Added `TestBoundedMemoryPlannerSequenceNumberSemantics` (4 tests) + `TestBoundedMemoryPlannerBehavioral` (5 tests) |
+| `_SortedRecordBatchReader` cleanup guard not tested | Medium | ✅ Added `TestSortedRecordBatchReaderCleanup` (full exhaustion + GC abandon paths) |
+| Expression-to-SQL for bound predicates not tested | Medium | ✅ Added `TestExpressionToSqlBoundPredicates` (11 tests). Also **fixed a bug**: `_literal_to_sql` was receiving `Literal` objects instead of raw values — produced broken SQL for all non-trivial predicates |
+| Multi-column anti-join warning threshold not tested | Low | ✅ Added `TestMultiColumnAntiJoinWarning` (above + below threshold) |
+| `_apply_sort_order` not tested with actual sort order metadata | Medium | ✅ Existing tests in `TestApplySortOrderWithRecordBatchReader` cover this |
+| No test for `_read_execution_config_from_file` cache invalidation | Low | ✅ Added `TestConfigCacheInvalidation` (3 tests: engine cache, file cache, env var pickup) |
 
 ### 7.3 Fragility Concerns
 
