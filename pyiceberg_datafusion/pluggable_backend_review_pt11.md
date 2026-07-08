@@ -99,7 +99,7 @@ This is the **LSP Contract** stated in the protocol docstring. The design correc
 - `test_equality_delete_greater_sequence_is_applied` — eq delete at seq=5, data at seq=3 → assigned ✅
 - `test_equality_delete_lesser_sequence_not_applied` — eq delete at seq=3, data at seq=5 → NOT assigned ✅
 
-### 3.2 CoW delete two-pass reads the file twice without file caching
+### 3.2 ~~CoW delete two-pass reads the file twice without file caching~~ (FIXED)
 
 **File:** `pyiceberg/table/__init__.py`, Transaction.delete
 
@@ -160,6 +160,17 @@ for original_file in files:
 # For S3, the extra pass adds ~file_size/bandwidth latency per rewritten file.
 # TODO: Add size-based threshold to use single-pass for small files.
 ```
+
+**Fix applied:** Implemented hybrid approach with `_COW_SINGLE_PASS_THRESHOLD = 128 MB`:
+- Files < 128 MB: single-pass (read once → materialize → filter → decide → write). One network round-trip.
+- Files ≥ 128 MB: two-pass streaming (count pass + write pass). Two round-trips, O(batch_size) memory.
+
+**TDD verification:** 5 tests in `TestCoWHybridSingleTwoPass`:
+- `test_threshold_constant_exists` — constant defined at 128 MB ✅
+- `test_small_file_reads_once` — verifies single read for small files ✅
+- `test_large_file_reads_twice` — confirms two-pass path for large files ✅
+- `test_small_file_all_rows_deleted_produces_empty_replacement` — structural check ✅
+- `test_hybrid_logic_branches_on_file_size` — verifies `file_size_in_bytes` branching ✅
 
 ### 3.3 `_instantiate_write` always returns PyArrow regardless of engine enum
 
@@ -446,7 +457,7 @@ This is **tested** in `test_combined_deletes.py` and the NULL-matching tests.
 
 ### Should Fix (non-blocking but important)
 
-4. **§3.2** — Add a comment documenting the double-read tradeoff for cloud CoW deletes
+4. ~~**§3.2** — Add a comment documenting the double-read tradeoff for cloud CoW deletes~~ ✅ Fixed with hybrid single/two-pass approach
 5. **§3.3** — Remove unused `engine` parameter from `_instantiate_write`
 6. **§7.2** — Add at least one integration test with a real InMemoryCatalog table round-trip
 7. **§4.3** — Fix the OOM warning message to mention compression ratio
