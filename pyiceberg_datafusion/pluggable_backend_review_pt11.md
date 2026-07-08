@@ -208,13 +208,13 @@ The `_ENV_LOCK = threading.RLock()` effectively serializes all DataFusion file-b
 
 Upstream issue filed: https://github.com/apache/datafusion-python/issues/1624
 
-### 4.2 `Backends.resolve()` is called on every scan/operation
+### 4.2 ~~`Backends.resolve()` is called on every scan/operation~~ (FIXED)
 
-Each call to `_to_arrow_via_file_scan_tasks`, `_to_arrow_batch_reader_via_file_scan_tasks`, `DataScan.count()`, and Transaction operations calls `Backends.resolve()`. While `_detect_available_engines` is cached, `_read_execution_config()` reads env vars on every call (by design — env vars can change). The `Backends.resolve()` also instantiates fresh backend objects each time.
+Each call to `_to_arrow_via_file_scan_tasks`, `_to_arrow_batch_reader_via_file_scan_tasks`, `DataScan.count()`, and Transaction operations previously called `Backends.resolve()` independently.
 
-**Impact:** For a scan that calls `count()` then `to_arrow()`, two separate `Backends` instances are created with separate `SessionContext` objects. This prevents session reuse.
+**Fix applied:** Added `@cached_property` on `DataScan._backends` that resolves once per scan instance. The module-level functions (`_to_arrow_via_file_scan_tasks`, `_to_arrow_batch_reader_via_file_scan_tasks`) now use `getattr(scan, "_backends", None)` to pick up the cached instance before falling back to `Backends.resolve()`. `DataScan.count()` uses `self._backends` directly.
 
-**Recommendation:** Consider caching the resolved `Backends` instance on the `DataScan` or `Table` object, invalidating only when io_properties change.
+This means a user calling `scan.count()` then `scan.to_arrow()` reuses the same resolved backends — no duplicate resolution, same backend instances.
 
 ### 4.3 `_warn_if_large_result` uses compressed file size as estimate
 
