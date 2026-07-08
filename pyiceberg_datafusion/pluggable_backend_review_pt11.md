@@ -428,13 +428,13 @@ This is **tested** in `test_combined_deletes.py` and the NULL-matching tests.
 | Lazy imports for optional deps | ✅ | DataFusion/DuckDB/Polars only imported when used |
 | Error messages (actionable, with install hints) | ✅ | Good UX: "pip install 'pyiceberg[datafusion]'" |
 
-### 10.2 Deviations from project style
+### 10.2 ~~Deviations from project style~~ (RESOLVED)
 
-1. **Comment verbosity:** The new code has significantly more inline comments than the rest of the codebase. E.g., the orchestrate_scan function has 30+ comment lines for 80 lines of code. PyIceberg's existing code tends toward sparse comments relying on good naming.
+1. **Comment verbosity:** ✅ Trimmed excessive inline comments in `_orchestrate.py` (removed 20+ lines of explanatory prose, kept concise single-line comments matching PyIceberg's sparse style).
 
-2. **Class per file vs. multi-class files:** The backends put multiple classes in one file (`PyArrowReadBackend`, `PyArrowWriteBackend`, `PyArrowComputeBackend` all in `pyarrow_backend.py`). This is fine for related classes but deviates from PyIceberg's typical one-concept-per-module pattern.
+2. **Class per file vs. multi-class files:** ACCEPTABLE — Three related classes per engine file (`Read`, `Write`, `Compute`) is cohesive grouping by engine, not random mixing. The pattern is: one file per engine, each implementing the relevant Protocol axes.
 
-3. **Module-level constants naming:** `_DUCKDB_FETCH_BATCH_SIZE`, `_OOM_WARNING_THRESHOLD_BYTES`, `_BOUNDED_PLANNER_THRESHOLD` — mixed underscore-prefixed (private) and non-prefixed (`DEFAULT_MEMORY_LIMIT`). Should be consistent.
+3. **Module-level constants naming:** ACCEPTABLE — `DEFAULT_MEMORY_LIMIT` (no underscore) is intentionally public (imported by other modules: `planning.py`, `duckdb_backend.py`, `datafusion_backend.py`). Private constants (`_DUCKDB_FETCH_BATCH_SIZE`, `_OOM_WARNING_THRESHOLD_BYTES`, etc.) are correctly underscore-prefixed. The naming is consistent with Python convention: public = no prefix, private = underscore prefix.
 
 ---
 
