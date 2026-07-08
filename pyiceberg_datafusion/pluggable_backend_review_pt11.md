@@ -85,14 +85,7 @@ This is the **LSP Contract** stated in the protocol docstring. The design correc
 
 ## 3. Critical Issues (Must Fix)
 
-### 3.1 `_SortedRecordBatchReader.create()` uses bare `Callable` without import guard
-
-**File:** `pyiceberg/table/__init__.py`  
-**Issue:** The `create()` static method has parameters typed `Callable` and `Any`, but `Callable` is already imported from `collections.abc` at the top of the file. However, `Any` is used without `TYPE_CHECKING` guard for the return type annotation. This is technically fine at runtime but inconsistent with the file's existing pattern of using `TYPE_CHECKING` for type-only imports.
-
-**Severity:** Low (no runtime failure, style inconsistency)
-
-### 3.2 BoundedMemoryPlanner SQL has incorrect LEFT JOIN semantics
+### 3.1 BoundedMemoryPlanner SQL has incorrect LEFT JOIN semantics
 
 **File:** `pyiceberg/execution/planning.py`, `_ASSIGNMENT_SQL`
 
@@ -118,7 +111,7 @@ However, there is a subtlety: for **equality deletes**, the spec says the delete
 - Add `del.content` to the schema and use `CASE WHEN del.content = 1 THEN del.sequence_number > d.sequence_number ELSE del.sequence_number >= d.sequence_number END`
 - Or document this as a known approximation (safe superset — never misses a valid delete)
 
-### 3.3 CoW delete two-pass reads the file twice without file caching
+### 3.2 CoW delete two-pass reads the file twice without file caching
 
 **File:** `pyiceberg/table/__init__.py`, Transaction.delete
 
@@ -140,7 +133,7 @@ batches_pass2 = backends.read.read_parquet(...)
 
 **Recommendation:** Document this tradeoff explicitly in the code. Consider a hybrid: if `original_row_count` is below a threshold (e.g., 100MB), do single-pass materialization; above threshold, accept the double-read cost for memory safety.
 
-### 3.4 `_instantiate_write` always returns PyArrow regardless of engine enum
+### 3.3 `_instantiate_write` always returns PyArrow regardless of engine enum
 
 **File:** `pyiceberg/execution/protocol.py`
 
@@ -212,28 +205,9 @@ Some methods use `io_properties: Properties` (required), others use `io_properti
 
 **Issue:** The implementations are more permissive than the protocol. While this works with structural typing (Protocol checks satisfied because `None` default is a superset of required), it's inconsistent and may confuse contributors.
 
-### 5.3 `_streaming_batches` in DuckDB backend uses `del con` anti-pattern
+### 5.3 ~~`_streaming_batches` in DuckDB backend uses `del con` anti-pattern~~ (FIXED)
 
-```python
-def _streaming_batches(con, result, rows_per_batch=...):
-    reader = result.fetch_record_batch(rows_per_batch=rows_per_batch)
-    try:
-        while True:
-            try:
-                batch = reader.read_next_batch()
-                yield batch
-            except StopIteration:
-                break
-    finally:
-        del con  # "Prevent 'con' from being optimized away"
-```
-
-**Issue:** The `del con` in `finally` doesn't prevent optimization — it's a no-op. The variable `con` is already referenced by the generator's closure just by being a parameter. The correct pattern is:
-```python
-finally:
-    _ = con  # Reference to prevent GC during iteration
-```
-Or simply don't do anything — the parameter reference is sufficient. The `del` actively RELEASES the reference earlier than needed.
+Previously used `del con` in `finally` which actively released the connection reference. Now uses `_ = con` to hold the reference until generator exhaustion. ✅ Resolved in current commit.
 
 ### 5.4 `_escape_path` in DuckDB is cross-cutting but not shared
 
@@ -394,7 +368,7 @@ This is **tested** in `test_combined_deletes.py` and the NULL-matching tests.
         (content(Del) = EQUALITY_DELETES → seq(Del) > seq(D))
 ```
 
-**Partially tested.** The BoundedMemoryPlanner uses `>=` uniformly (see §3.2).
+**Partially tested.** The BoundedMemoryPlanner uses `>=` uniformly (see §3.1).
 
 ---
 
@@ -438,14 +412,14 @@ This is **tested** in `test_combined_deletes.py` and the NULL-matching tests.
 
 ### Must Fix (blocking merge)
 
-1. **§3.2** — Document the BoundedMemoryPlanner `>=` vs `>` distinction for equality deletes (or fix the SQL)
-2. **§5.3** — Fix the `del con` anti-pattern in DuckDB streaming (or just remove the `del` — the closure reference is sufficient)
+1. **§3.1** — Document the BoundedMemoryPlanner `>=` vs `>` distinction for equality deletes (or fix the SQL)
+2. ~~**§5.3** — Fix the `del con` anti-pattern in DuckDB streaming~~ ✅ Already fixed (`_ = con`)
 3. **§6.3** — Call out equality delete support enablement in PR description (it's a feature, not just a refactor)
 
 ### Should Fix (non-blocking but important)
 
-4. **§3.3** — Add a comment documenting the double-read tradeoff for cloud CoW deletes
-5. **§3.4** — Remove unused `engine` parameter from `_instantiate_write`
+4. **§3.2** — Add a comment documenting the double-read tradeoff for cloud CoW deletes
+5. **§3.3** — Remove unused `engine` parameter from `_instantiate_write`
 6. **§7.2** — Add at least one integration test with a real InMemoryCatalog table round-trip
 7. **§4.3** — Fix the OOM warning message to mention compression ratio
 
