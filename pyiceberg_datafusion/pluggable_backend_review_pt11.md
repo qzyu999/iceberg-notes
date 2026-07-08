@@ -406,7 +406,11 @@ This is **tested** in `test_combined_deletes.py` and the NULL-matching tests.
         (content(Del) = EQUALITY_DELETES → seq(Del) > seq(D))
 ```
 
-**Partially tested.** The BoundedMemoryPlanner now correctly distinguishes equality (`>`) from position (`>=`) deletes (see §3.1 — FIXED).
+**Fully tested.** ✅ The BoundedMemoryPlanner's `_ASSIGNMENT_SQL` uses a `CASE WHEN del.content = 2 THEN > ELSE >=` clause that correctly implements the spec distinction. Verified by 4 TDD tests in `TestBoundedMemoryPlannerSequenceNumberSemantics`:
+- Equality delete at same seq → NOT applied (5 > 5 = FALSE)
+- Position delete at same seq → applied (5 >= 5 = TRUE)
+- Equality delete at greater seq → applied (5 > 3 = TRUE)
+- Equality delete at lesser seq → NOT applied (3 > 5 = FALSE)
 
 ---
 
