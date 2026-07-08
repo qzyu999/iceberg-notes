@@ -462,15 +462,15 @@ This is **tested** in `test_combined_deletes.py` and the NULL-matching tests.
 
 4. ~~**§3.2** — Add a comment documenting the double-read tradeoff for cloud CoW deletes~~ ✅ Fixed with hybrid single/two-pass approach
 5. ~~**§3.3** — Remove unused `engine` parameter from `_instantiate_write`~~ ✅ Parameter removed, docstring expanded
-6. **§7.2** — Add at least one integration test with a real InMemoryCatalog table round-trip
-7. **§4.3** — Fix the OOM warning message to mention compression ratio
+6. ~~**§7.2** — Add at least one integration test with a real InMemoryCatalog table round-trip~~ ✅ Added `test_inmemory_roundtrip.py` (8 tests: write, scan, filter, projection, empty, multi-append, batch_reader, delete). Skips on Windows (PyArrowFileIO path scheme limitation), runs in Linux CI.
+7. ~~**§4.3** — Fix the OOM warning message to mention compression ratio~~ ✅ Fixed: message now shows compressed size + estimated 2-5× in-memory range.
 
 ### Nice to Have (follow-up PRs)
 
-8. Cache `Backends` on DataScan to avoid repeated resolution
-9. Make `_BOUNDED_PLANNER_THRESHOLD` configurable
-10. Convert inspect.getsource tests to behavioral tests
-11. Add `BoundedMemoryPlanner` end-to-end behavioral test
+8. ~~Cache `Backends` on DataScan to avoid repeated resolution~~ ✅ Done (`@cached_property _backends`)
+9. ~~Make `_BOUNDED_PLANNER_THRESHOLD` configurable~~ ✅ Done (config file + env var)
+10. Convert inspect.getsource tests to behavioral tests — DEFERRED (tagged `@pytest.mark.stabilization`, will be removed after ArrowScan is deleted)
+11. ~~Add `BoundedMemoryPlanner` end-to-end behavioral test~~ ✅ Done (`TestBoundedMemoryPlannerSequenceNumberSemantics` + `TestBoundedMemoryPlannerWithRealData`)
 
 ---
 
