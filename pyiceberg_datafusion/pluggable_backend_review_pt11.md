@@ -115,11 +115,51 @@ for batch in batches_pass1:
 batches_pass2 = backends.read.read_parquet(...)
 ```
 
-**Issue:** For cloud storage (S3), this performs two complete file reads with network I/O. The original single-pass approach materialized once. The two-pass approach achieves O(batch_size) peak memory but doubles I/O cost.
+**Issue:** For cloud storage (S3/GCS/ADLS), this performs two complete file reads over the network. The original single-pass approach (`ArrowScan.to_table()`) materialized the entire file in memory once. The new two-pass approach achieves O(batch_size) peak memory but doubles I/O cost — every byte of every rewritten data file is downloaded twice.
 
-**Severity:** Medium — performance regression for cloud tables. The latency doubles for every rewritten file during CoW deletes.
+**Severity:** Medium — performance regression proportional to the number of files requiring CoW rewrite. For a delete touching 100 files × 256MB each, the extra pass adds ~25 GB of unnecessary network reads at S3 bandwidth (~100 MB/s per file = ~4 min added latency).
 
-**Recommendation:** Document this tradeoff explicitly in the code. Consider a hybrid: if `original_row_count` is below a threshold (e.g., 100MB), do single-pass materialization; above threshold, accept the double-read cost for memory safety.
+**Why two passes?** The code needs to know if ANY rows survive filtering BEFORE starting the writer. If zero rows survive, the file is dropped entirely (no write). If all rows survive, the file is skipped (no rewrite needed). The pass-1 count determines which of three branches to take.
+
+**Concrete recommendation — hybrid single/two-pass with size threshold:**
+
+```python
+# Proposed fix in Transaction.delete CoW path:
+_COW_SINGLE_PASS_THRESHOLD = 128 * 1024 * 1024  # 128 MB compressed
+
+for original_file in files:
+    file_size = original_file.file.file_size_in_bytes
+
+    if file_size <= _COW_SINGLE_PASS_THRESHOLD:
+        # SMALL FILE: Single-pass materialization (fast, O(file_size) memory).
+        # Acceptable because file_size ≤ 128 MB → Arrow representation ≤ ~640 MB.
+        batches = list(backends.read.read_parquet(...))
+        table = pa.Table.from_batches(batches)
+        filtered = table.filter(preserve_row_filter)
+
+        if filtered.num_rows == 0:
+            replaced_files.append((original_file.file, []))
+        elif filtered.num_rows < table.num_rows:
+            # Write filtered table via _dataframe_to_data_files
+            replaced_files.append((original_file.file, list(_dataframe_to_data_files(..., df=filtered))))
+    else:
+        # LARGE FILE: Two-pass streaming (O(batch_size) memory, 2× I/O).
+        # Pass 1: count → decide action
+        # Pass 2: stream filtered rows to writer
+        ...  # existing two-pass logic
+```
+
+**Why 128 MB?** Compressed Parquet files expand ~2-5× in Arrow memory. At 128 MB compressed, worst-case Arrow memory is ~640 MB — safely below typical container limits (2-4 GB). Files above this threshold genuinely need streaming to avoid OOM.
+
+**Alternative (no code change):** Add an inline comment documenting the tradeoff:
+```python
+# TRADEOFF: Two-pass reads the file twice (2× I/O for cloud storage).
+# This is intentional: Pass 1 determines action (drop/skip/rewrite) before
+# committing to a writer. Single-pass would require holding the full file
+# in memory to count rows, which OOMs for large data files.
+# For S3, the extra pass adds ~file_size/bandwidth latency per rewritten file.
+# TODO: Add size-based threshold to use single-pass for small files.
+```
 
 ### 3.3 `_instantiate_write` always returns PyArrow regardless of engine enum
 
