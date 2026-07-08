@@ -85,31 +85,19 @@ This is the **LSP Contract** stated in the protocol docstring. The design correc
 
 ## 3. Critical Issues (Must Fix)
 
-### 3.1 BoundedMemoryPlanner SQL has incorrect LEFT JOIN semantics
+### 3.1 ~~BoundedMemoryPlanner SQL has incorrect LEFT JOIN semantics~~ (FIXED)
 
 **File:** `pyiceberg/execution/planning.py`, `_ASSIGNMENT_SQL`
 
-```sql
-LEFT JOIN delete_entries del
-    ON d.partition_key = del.partition_key
-    AND del.sequence_number >= d.sequence_number
-```
+**Issue (was):** The SQL used a uniform `del.sequence_number >= d.sequence_number` for all delete types. Per Iceberg spec, equality deletes require strictly greater (`>`), not `>=`.
 
-**Issue:** The Iceberg spec requires that a delete file applies to a data file if:
-1. Same partition (scoping)
-2. `delete.sequence_number >= data.sequence_number` (the delete was written AFTER the data, so it applies)
+**Fix applied:** Added `CASE WHEN del.content = 2 THEN del.sequence_number > d.sequence_number ELSE del.sequence_number >= d.sequence_number END` to the JOIN condition. Content values: POSITION_DELETES=1 (uses `>=`), EQUALITY_DELETES=2 (uses `>`).
 
-The SQL is: `del.sequence_number >= d.sequence_number`. This means "delete entries whose sequence number is >= the data file's sequence number" — which is **INVERTED**. Per the spec, a delete applies if it was written at a sequence number ≥ the data file's sequence number. So the condition should be `del.sequence_number >= d.sequence_number`.
-
-Wait — re-reading: the SQL says `del.sequence_number >= d.sequence_number`. This IS correct. A delete file at sequence 5 applies to a data file at sequence 3 (5 >= 3 ✓). A delete file at sequence 2 does NOT apply to a data file at sequence 3 (2 >= 3 ✗). **Correct.**
-
-However, there is a subtlety: for **equality deletes**, the spec says the delete applies if `delete_sequence_number > data_sequence_number` (strictly greater). For **position deletes**, `>=` is correct. The SQL uses a single `>=` for all delete types without distinguishing content type.
-
-**Severity:** Medium — potential over-application of equality deletes when `delete.seq == data.seq`. In practice this is rare (same commit would need both data + eq delete), but spec-incorrect.
-
-**Fix:** Either:
-- Add `del.content` to the schema and use `CASE WHEN del.content = 1 THEN del.sequence_number > d.sequence_number ELSE del.sequence_number >= d.sequence_number END`
-- Or document this as a known approximation (safe superset — never misses a valid delete)
+**TDD verification:** 4 tests in `TestBoundedMemoryPlannerSequenceNumberSemantics`:
+- `test_equality_delete_same_sequence_not_applied` — eq delete at seq=5, data at seq=5 → NOT assigned ✅
+- `test_position_delete_same_sequence_is_applied` — pos delete at seq=5, data at seq=5 → assigned ✅
+- `test_equality_delete_greater_sequence_is_applied` — eq delete at seq=5, data at seq=3 → assigned ✅
+- `test_equality_delete_lesser_sequence_not_applied` — eq delete at seq=3, data at seq=5 → NOT assigned ✅
 
 ### 3.2 CoW delete two-pass reads the file twice without file caching
 
@@ -368,7 +356,7 @@ This is **tested** in `test_combined_deletes.py` and the NULL-matching tests.
         (content(Del) = EQUALITY_DELETES → seq(Del) > seq(D))
 ```
 
-**Partially tested.** The BoundedMemoryPlanner uses `>=` uniformly (see §3.1).
+**Partially tested.** The BoundedMemoryPlanner now correctly distinguishes equality (`>`) from position (`>=`) deletes (see §3.1 — FIXED).
 
 ---
 
@@ -412,7 +400,7 @@ This is **tested** in `test_combined_deletes.py` and the NULL-matching tests.
 
 ### Must Fix (blocking merge)
 
-1. **§3.1** — Document the BoundedMemoryPlanner `>=` vs `>` distinction for equality deletes (or fix the SQL)
+1. ~~**§3.1** — Document the BoundedMemoryPlanner `>=` vs `>` distinction for equality deletes (or fix the SQL)~~ ✅ Fixed with CASE WHEN + TDD tests
 2. ~~**§5.3** — Fix the `del con` anti-pattern in DuckDB streaming~~ ✅ Already fixed (`_ = con`)
 3. **§6.3** — Call out equality delete support enablement in PR description (it's a feature, not just a refactor)
 
