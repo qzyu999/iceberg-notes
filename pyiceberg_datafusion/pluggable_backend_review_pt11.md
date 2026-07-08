@@ -197,6 +197,17 @@ The `_ENV_LOCK = threading.RLock()` effectively serializes all DataFusion file-b
 
 **Recommendation:** This is correctly documented in the code but should be called out in the PR description as a known limitation with a future fix path (per-session object store config in upstream datafusion-python).
 
+**UPDATE (investigation result):** The `register_object_store()` API already exists in `datafusion-python 54.0.0` and accepts credentials directly for S3 (`AmazonS3(bucket, access_key_id=..., secret_access_key=...)`) and Azure (`MicrosoftAzure(container, account=..., access_key=...)`). GCS is limited (`GoogleCloud(bucket, service_account_path=...)` — file path only, no inline token).
+
+**Fix path (no upstream needed for S3/ADLS):**
+1. Parse bucket/container from the file path
+2. Create `AmazonS3` / `MicrosoftAzure` from `io_properties`
+3. Call `ctx.register_object_store(scheme, store, host=bucket)` per SessionContext
+4. Remove `_scoped_env_vars` + `_ENV_LOCK` for S3/ADLS paths
+5. Retain env var fallback only for GCS (until upstream adds inline token support)
+
+Upstream issue filed: https://github.com/apache/datafusion-python/issues/1623
+
 ### 4.2 `Backends.resolve()` is called on every scan/operation
 
 Each call to `_to_arrow_via_file_scan_tasks`, `_to_arrow_batch_reader_via_file_scan_tasks`, `DataScan.count()`, and Transaction operations calls `Backends.resolve()`. While `_detect_available_engines` is cached, `_read_execution_config()` reads env vars on every call (by design — env vars can change). The `Backends.resolve()` also instantiates fresh backend objects each time.
