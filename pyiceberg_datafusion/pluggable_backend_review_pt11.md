@@ -359,12 +359,14 @@ graph LR
 |-----------|-------------|------------|
 | Scan (no deletes) | O(batch_size) per task, O(tasks × batch_size) total in executor | Streaming |
 | Scan (pos deletes) | O(delete_positions) + O(batch_size) | Semi-bounded |
-| Scan (eq deletes, both types) | O(data_file + eq_delete_file) | **Unbounded** |
+| Scan (eq deletes, both types) | DataFusion: O(memory_limit); PyArrow: O(data_file + eq_delete_file) | **Bounded** (DF) / Unbounded (PA) |
 | CoW delete | O(batch_size) per pass | Streaming |
 | Sort-on-write (DataFusion) | O(memory_limit) + O(result_size) return | Bounded compute, unbounded return |
 | BoundedMemoryPlanner | O(num_entries) for lookup dicts | **Unbounded** (documented) |
 
-The "eq deletes + pos deletes combined" path materializes both sides for anti_join — this is correctly documented as unavoidable for hash-join semantics.
+The "eq deletes + pos deletes combined" path now branches on `supports_bounded_memory`:
+- **DataFusion/DuckDB**: materializes pos-delete-resolved output to temp Parquet → `anti_join_from_files` (Grace Hash Join with spill). Peak memory: O(memory_limit). ✅ Bounded.
+- **PyArrow/Polars**: `anti_join` on iterators (materializes both sides). Peak memory: O(data_file + eq_delete_file). Unbounded but acceptable for the in-memory-only backends.
 
 ---
 
