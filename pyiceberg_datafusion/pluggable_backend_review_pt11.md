@@ -216,20 +216,24 @@ Each call to `_to_arrow_via_file_scan_tasks`, `_to_arrow_batch_reader_via_file_s
 
 This means a user calling `scan.count()` then `scan.to_arrow()` reuses the same resolved backends — no duplicate resolution, same backend instances.
 
-### 4.3 `_warn_if_large_result` uses compressed file size as estimate
+### 4.3 ~~`_warn_if_large_result` uses compressed file size as estimate~~ (FIXED)
 
-```python
-total_file_bytes = sum(task.file.file_size_in_bytes for task in tasks)
-if total_file_bytes > _OOM_WARNING_THRESHOLD_BYTES:
+The warning message now correctly distinguishes compressed vs. in-memory size:
+
+```
+"Scan references 3.2 GB of compressed Parquet data. In-memory Arrow representation
+may be 2-5× larger (6-16 GB). This may cause an out-of-memory error..."
 ```
 
-The comment says "actual Arrow memory is typically 2-5× larger than compressed Parquet" but the threshold is applied to the compressed size. A 2GB compressed dataset could be 10GB in Arrow memory. The warning at 2GB compressed is conservative (good), but the user-facing message says "estimated X GB into memory" which is misleading — it should say "compressed file size is X GB; in-memory representation may be 2-5× larger."
+Previously said "estimated X GB into memory" which was misleading (it was the compressed size, not the in-memory estimate).
 
-### 4.4 `_BOUNDED_PLANNER_THRESHOLD = 100_000` — no user override
+### 4.4 ~~`_BOUNDED_PLANNER_THRESHOLD = 100_000` — no user override~~ (FIXED)
 
-This threshold auto-switches from InMemoryPlanner to BoundedMemoryPlanner. There's no configuration property to control this. A user with a 256GB machine might want to keep in-memory planning at 500K deletes. A user with 8GB might want bounded planning at 10K.
+The threshold is now configurable via:
+- `.pyiceberg.yaml`: `execution.planning-threshold: 50000`
+- Environment variable: `PYICEBERG_EXECUTION__PLANNING_THRESHOLD=50000`
 
-**Recommendation:** Expose as `execution.planning-threshold` in .pyiceberg.yaml.
+Priority: env var > config file > default (100,000). This allows users with large RAM to increase the threshold (avoid unnecessary DataFusion overhead) and users with limited RAM to decrease it (trigger bounded planning earlier).
 
 ---
 
