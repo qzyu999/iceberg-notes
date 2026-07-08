@@ -206,7 +206,7 @@ The `_ENV_LOCK = threading.RLock()` effectively serializes all DataFusion file-b
 4. Remove `_scoped_env_vars` + `_ENV_LOCK` for S3/ADLS paths
 5. Retain env var fallback only for GCS (until upstream adds inline token support)
 
-Upstream issue filed: https://github.com/apache/datafusion-python/issues/1623
+Upstream issue filed: https://github.com/apache/datafusion-python/issues/1624
 
 ### 4.2 `Backends.resolve()` is called on every scan/operation
 
