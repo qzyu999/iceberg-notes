@@ -172,20 +172,16 @@ for original_file in files:
 - `test_small_file_all_rows_deleted_produces_empty_replacement` — structural check ✅
 - `test_hybrid_logic_branches_on_file_size` — verifies `file_size_in_bytes` branching ✅
 
-### 3.3 `_instantiate_write` always returns PyArrow regardless of engine enum
+### 3.3 ~~`_instantiate_write` always returns PyArrow regardless of engine enum~~ (FIXED)
 
 **File:** `pyiceberg/execution/protocol.py`
 
-```python
-def _instantiate_write(engine: Any) -> WriteBackend:
-    """Always PyArrow — only PyArrow produces the detailed statistics..."""
-    from pyiceberg.execution.backends.pyarrow_backend import PyArrowWriteBackend
-    return PyArrowWriteBackend()
-```
+**Fix applied:** Removed the unused `engine: Any` parameter. Function is now `_instantiate_write() -> WriteBackend` with an expanded docstring explaining why only PyArrow is viable (it's the only backend producing per-column Parquet statistics needed for Iceberg DataFile metadata).
 
-**Issue:** The `engine` parameter is accepted but completely ignored. The function signature is misleading — callers might expect to get a DuckDB or DataFusion write backend.
-
-**Fix:** Either remove the parameter (make it `_instantiate_write() -> WriteBackend`) or add a comment explaining why other engines cannot provide write.
+**TDD verification:** 3 tests in `TestInstantiateWriteAlwaysPyArrow`:
+- `test_instantiate_write_takes_no_parameters` — signature has zero required params ✅
+- `test_instantiate_write_returns_pyarrow_write_backend` — always returns PyArrowWriteBackend ✅
+- `test_backends_resolve_always_produces_pyarrow_write` — Backends.resolve() uses PyArrow for write ✅
 
 ---
 
@@ -458,7 +454,7 @@ This is **tested** in `test_combined_deletes.py` and the NULL-matching tests.
 ### Should Fix (non-blocking but important)
 
 4. ~~**§3.2** — Add a comment documenting the double-read tradeoff for cloud CoW deletes~~ ✅ Fixed with hybrid single/two-pass approach
-5. **§3.3** — Remove unused `engine` parameter from `_instantiate_write`
+5. ~~**§3.3** — Remove unused `engine` parameter from `_instantiate_write`~~ ✅ Parameter removed, docstring expanded
 6. **§7.2** — Add at least one integration test with a real InMemoryCatalog table round-trip
 7. **§4.3** — Fix the OOM warning message to mention compression ratio
 
